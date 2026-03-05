@@ -4,11 +4,12 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, FileText, CheckSquare, BarChart3, MessageSquare,
   Settings, List, Hash, ScrollText, ChevronLeft, ChevronRight,
-  MessageCircle,
+  MessageCircle, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSidebarCtx } from '@/layouts/AppLayout'
 
 interface NavItem {
   label: string
@@ -32,8 +33,9 @@ export const AppSidebar: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false)
   const location = useLocation()
   const { workspace } = useAuth()
+  const { mobileOpen, closeMobile } = useSidebarCtx()
 
-  return (
+  const nav = (
     <aside className={cn(
       'h-full bg-card border-r border-border flex flex-col transition-all duration-300 shrink-0',
       collapsed ? 'w-16' : 'w-60'
@@ -56,14 +58,26 @@ export const AppSidebar: React.FC = () => {
             </div>
           </div>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="shrink-0 h-8 w-8"
-          onClick={() => setCollapsed(prev => !prev)}
-        >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-        </Button>
+        <div className="flex items-center gap-1">
+          {/* Close button on mobile */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden shrink-0 h-8 w-8"
+            onClick={closeMobile}
+          >
+            <X className="w-4 h-4" />
+          </Button>
+          {/* Collapse toggle on desktop */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden lg:flex shrink-0 h-8 w-8"
+            onClick={() => setCollapsed(prev => !prev)}
+          >
+            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </Button>
+        </div>
       </div>
 
       {/* Nav */}
@@ -77,6 +91,7 @@ export const AppSidebar: React.FC = () => {
             <NavLink
               key={path}
               to={path}
+              onClick={closeMobile}
               className={cn(
                 'flex items-center gap-3 px-2 py-2 rounded-lg text-sm font-medium transition-colors',
                 'hover:bg-accent hover:text-accent-foreground',
@@ -103,5 +118,22 @@ export const AppSidebar: React.FC = () => {
         })}
       </nav>
     </aside>
+  )
+
+  return (
+    <>
+      {/* Desktop sidebar — always visible */}
+      <div className="hidden lg:flex h-full">
+        {nav}
+      </div>
+
+      {/* Mobile sidebar — slide-in overlay */}
+      <div className={cn(
+        'fixed inset-y-0 left-0 z-30 lg:hidden transition-transform duration-300',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full'
+      )}>
+        {nav}
+      </div>
+    </>
   )
 }

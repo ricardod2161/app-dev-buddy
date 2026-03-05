@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { X, Plus, Save, Loader2 } from 'lucide-react'
+import { X, Plus, Save, Loader2, Search } from 'lucide-react'
 
 const SettingsPage: React.FC = () => {
   const { workspaceId } = useAuth()
@@ -35,33 +35,37 @@ const SettingsPage: React.FC = () => {
   const [newCategory, setNewCategory] = useState('')
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
+  const [tzSearch, setTzSearch] = useState('')
 
   React.useEffect(() => {
     if (settings) {
       setCategories((settings.default_categories as string[]) ?? [])
       setTags((settings.default_tags as string[]) ?? [])
       setBotFormat(settings.bot_response_format)
-      setTimezone(settings.timezone)
-      setLanguage(settings.language)
+      setTimezone(settings.timezone ?? 'America/Sao_Paulo')
+      setLanguage(settings.language ?? 'pt-BR')
     }
   }, [settings])
 
-  const timezones = (Intl as unknown as { supportedValuesOf: (k: string) => string[] }).supportedValuesOf('timeZone')
+  const allTimezones = useMemo(() =>
+    (Intl as unknown as { supportedValuesOf: (k: string) => string[] }).supportedValuesOf('timeZone'),
+    []
+  )
+
+  const filteredTimezones = useMemo(() =>
+    tzSearch
+      ? allTimezones.filter(tz => tz.toLowerCase().includes(tzSearch.toLowerCase()))
+      : allTimezones,
+    [allTimezones, tzSearch]
+  )
 
   const save = async () => {
     if (!workspaceId) return
     setSaving(true)
     try {
-      const payload = {
-        default_categories: categories,
-        default_tags: tags,
-        bot_response_format: botFormat,
-        timezone,
-        language,
-      }
       const { error } = await supabase
         .from('workspace_settings')
-        .update(payload)
+        .update({ default_categories: categories, default_tags: tags, bot_response_format: botFormat, timezone, language })
         .eq('workspace_id', workspaceId)
       if (error) throw error
       toast.success('Configurações salvas')
@@ -73,10 +77,24 @@ const SettingsPage: React.FC = () => {
     }
   }
 
-  if (isLoading) return <div className="space-y-4">{[...Array(3)].map((_, i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />)}</div>
+  if (isLoading) return (
+    <div className="space-y-4 max-w-2xl">
+      {[...Array(3)].map((_, i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />)}
+    </div>
+  )
+
+  const addCategory = () => {
+    const v = newCategory.trim()
+    if (v && !categories.includes(v)) { setCategories(prev => [...prev, v]); setNewCategory('') }
+  }
+
+  const addTag = () => {
+    const v = newTag.trim()
+    if (v && !tags.includes(v)) { setTags(prev => [...prev, v]); setNewTag('') }
+  }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl animate-slide-up">
       {/* Categorias */}
       <Card>
         <CardHeader>
@@ -88,7 +106,7 @@ const SettingsPage: React.FC = () => {
             {categories.map(cat => (
               <Badge key={cat} variant="secondary" className="gap-1 px-3 py-1 text-sm">
                 {cat}
-                <button onClick={() => setCategories(prev => prev.filter(c => c !== cat))} className="ml-1 hover:text-destructive">
+                <button onClick={() => setCategories(prev => prev.filter(c => c !== cat))} className="ml-1 hover:text-destructive transition-colors">
                   <X className="w-3 h-3" />
                 </button>
               </Badge>
@@ -98,18 +116,11 @@ const SettingsPage: React.FC = () => {
             <Input
               value={newCategory}
               onChange={e => setNewCategory(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (newCategory.trim() && !categories.includes(newCategory.trim())) { setCategories(prev => [...prev, newCategory.trim()]); setNewCategory('') } } }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory() } }}
               placeholder="Nova categoria..."
               className="flex-1"
             />
-            <Button variant="outline" onClick={() => {
-              if (newCategory.trim() && !categories.includes(newCategory.trim())) {
-                setCategories(prev => [...prev, newCategory.trim()])
-                setNewCategory('')
-              }
-            }}>
-              <Plus className="w-4 h-4" />
-            </Button>
+            <Button variant="outline" onClick={addCategory}><Plus className="w-4 h-4" /></Button>
           </div>
         </CardContent>
       </Card>
@@ -125,7 +136,7 @@ const SettingsPage: React.FC = () => {
             {tags.map(tag => (
               <Badge key={tag} variant="outline" className="gap-1 px-3 py-1 text-sm">
                 #{tag}
-                <button onClick={() => setTags(prev => prev.filter(t => t !== tag))} className="ml-1 hover:text-destructive">
+                <button onClick={() => setTags(prev => prev.filter(t => t !== tag))} className="ml-1 hover:text-destructive transition-colors">
                   <X className="w-3 h-3" />
                 </button>
               </Badge>
@@ -135,18 +146,11 @@ const SettingsPage: React.FC = () => {
             <Input
               value={newTag}
               onChange={e => setNewTag(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (newTag.trim() && !tags.includes(newTag.trim())) { setTags(prev => [...prev, newTag.trim()]); setNewTag('') } } }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
               placeholder="Nova tag..."
               className="flex-1"
             />
-            <Button variant="outline" onClick={() => {
-              if (newTag.trim() && !tags.includes(newTag.trim())) {
-                setTags(prev => [...prev, newTag.trim()])
-                setNewTag('')
-              }
-            }}>
-              <Plus className="w-4 h-4" />
-            </Button>
+            <Button variant="outline" onClick={addTag}><Plus className="w-4 h-4" /></Button>
           </div>
         </CardContent>
       </Card>
@@ -158,39 +162,70 @@ const SettingsPage: React.FC = () => {
           <CardDescription>Define o nível de detalhe das respostas automáticas</CardDescription>
         </CardHeader>
         <CardContent>
-          <RadioGroup value={botFormat} onValueChange={v => setBotFormat(v as WorkspaceSettings['bot_response_format'])}>
-            <div className="flex items-center space-x-2">
+          <RadioGroup value={botFormat} onValueChange={v => setBotFormat(v as WorkspaceSettings['bot_response_format'])} className="space-y-3">
+            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
               <RadioGroupItem value="curto" id="curto" />
-              <Label htmlFor="curto">Curto — Resposta mínima e direta</Label>
+              <div>
+                <Label htmlFor="curto" className="cursor-pointer font-medium">Curto</Label>
+                <p className="text-xs text-muted-foreground">Resposta mínima e direta</p>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
               <RadioGroupItem value="medio" id="medio" />
-              <Label htmlFor="medio">Médio — Informações essenciais com confirmação</Label>
+              <div>
+                <Label htmlFor="medio" className="cursor-pointer font-medium">Médio</Label>
+                <p className="text-xs text-muted-foreground">Informações essenciais com confirmação</p>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
               <RadioGroupItem value="detalhado" id="detalhado" />
-              <Label htmlFor="detalhado">Detalhado — Resposta completa com todos os dados</Label>
+              <div>
+                <Label htmlFor="detalhado" className="cursor-pointer font-medium">Detalhado</Label>
+                <p className="text-xs text-muted-foreground">Resposta completa com todos os dados</p>
+              </div>
             </div>
           </RadioGroup>
         </CardContent>
       </Card>
 
-      {/* Fuso horário e idioma */}
+      {/* Localização */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Localização</CardTitle>
+          <CardDescription>Fuso horário e idioma do workspace</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
             <Label>Fuso Horário</Label>
-            <Select value={timezone} onValueChange={setTimezone}>
+            <Select value={timezone} onValueChange={v => { setTimezone(v); setTzSearch('') }}>
               <SelectTrigger className="mt-1">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-64">
-                {timezones.map(tz => (
-                  <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                ))}
+                {/* Search inside select */}
+                <div className="sticky top-0 bg-popover p-2 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      value={tzSearch}
+                      onChange={e => setTzSearch(e.target.value)}
+                      placeholder="Buscar fuso horário..."
+                      className="pl-8 h-8 text-sm"
+                      onKeyDown={e => e.stopPropagation()}
+                      onClick={e => e.stopPropagation()}
+                    />
+                  </div>
+                </div>
+                <div className="overflow-y-auto max-h-48">
+                  {filteredTimezones.slice(0, 100).map(tz => (
+                    <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                  ))}
+                  {filteredTimezones.length > 100 && (
+                    <p className="text-xs text-muted-foreground text-center py-2">
+                      +{filteredTimezones.length - 100} resultados — refine a busca
+                    </p>
+                  )}
+                </div>
               </SelectContent>
             </Select>
           </div>
@@ -209,7 +244,7 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Button onClick={save} disabled={saving} size="lg">
+      <Button onClick={save} disabled={saving} size="lg" className="w-full sm:w-auto">
         {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
         Salvar Configurações
       </Button>

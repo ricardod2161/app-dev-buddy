@@ -11,14 +11,20 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Pencil, Trash2, LayoutGrid, List } from 'lucide-react'
-import { DndContext, DragEndEvent, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { Plus, Pencil, Trash2, LayoutGrid, List, CheckSquare } from 'lucide-react'
+import {
+  DndContext, DragEndEvent, DragOverlay, DragOverEvent,
+  closestCenter, PointerSensor, useSensor, useSensors
+} from '@dnd-kit/core'
+import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { EmptyState } from '@/components/EmptyState'
+import { cn } from '@/lib/utils'
 
 const priorityConfig: Record<Task['priority'], { label: string; class: string }> = {
   high: { label: '🔴 Alta', class: 'bg-destructive/10 text-destructive border-destructive/20' },
@@ -26,13 +32,45 @@ const priorityConfig: Record<Task['priority'], { label: string; class: string }>
   low: { label: '🟢 Baixa', class: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400' },
 }
 
-const statusColumns: { key: Task['status']; label: string }[] = [
-  { key: 'todo', label: '📋 A Fazer' },
-  { key: 'doing', label: '🔄 Em Andamento' },
-  { key: 'done', label: '✅ Concluído' },
+const statusColumns: { key: Task['status']; label: string; color: string }[] = [
+  { key: 'todo', label: '📋 A Fazer', color: 'border-border' },
+  { key: 'doing', label: '🔄 Em Andamento', color: 'border-primary/50' },
+  { key: 'done', label: '✅ Concluído', color: 'border-green-500/50' },
 ]
 
-// --- Task Card para Kanban ---
+// --- Droppable Column ---
+interface DroppableColumnProps {
+  id: string
+  children: React.ReactNode
+  isOver: boolean
+  label: string
+  count: number
+  color: string
+}
+
+const DroppableColumn: React.FC<DroppableColumnProps> = ({ id, children, isOver, label, count, color }) => {
+  const { setNodeRef } = useDroppable({ id })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'bg-muted/40 rounded-xl p-3 min-h-64 flex flex-col border-2 transition-colors duration-150',
+        isOver ? 'border-primary bg-primary/5' : `border-transparent`
+      )}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-sm text-foreground">{label}</h3>
+        <Badge variant="secondary" className="text-xs">{count}</Badge>
+      </div>
+      <div className="flex-1 space-y-2 min-h-10">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// --- Sortable Task Card ---
 interface TaskCardProps { task: Task; onEdit: (t: Task) => void; onDelete: (t: Task) => void }
 
 const SortableTaskCard: React.FC<TaskCardProps> = ({ task, onEdit, onDelete }) => {
@@ -44,17 +82,21 @@ const SortableTaskCard: React.FC<TaskCardProps> = ({ task, onEdit, onDelete }) =
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`bg-card border rounded-lg p-3 cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow ${isDragging ? 'opacity-50' : ''} ${isOverdue ? 'border-destructive' : 'border-border'}`}
+      className={cn(
+        'bg-card border rounded-lg p-3 cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-all',
+        isDragging ? 'opacity-40 scale-95' : '',
+        isOverdue ? 'border-destructive' : 'border-border'
+      )}
       {...attributes}
       {...listeners}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium text-foreground flex-1">{task.title}</p>
+        <p className="text-sm font-medium text-foreground flex-1 leading-snug">{task.title}</p>
         <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-          <button onClick={() => onEdit(task)} className="text-muted-foreground hover:text-foreground p-0.5 rounded">
+          <button onClick={() => onEdit(task)} className="text-muted-foreground hover:text-foreground p-0.5 rounded transition-colors">
             <Pencil className="w-3 h-3" />
           </button>
-          <button onClick={() => onDelete(task)} className="text-muted-foreground hover:text-destructive p-0.5 rounded">
+          <button onClick={() => onDelete(task)} className="text-muted-foreground hover:text-destructive p-0.5 rounded transition-colors">
             <Trash2 className="w-3 h-3" />
           </button>
         </div>
@@ -123,7 +165,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{task ? 'Editar Tarefa' : 'Nova Tarefa'}</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div>
@@ -185,6 +227,7 @@ const TasksPage: React.FC = () => {
   const [editTask, setEditTask] = useState<Task | null>(null)
   const [deleteTask, setDeleteTask] = useState<Task | null>(null)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
@@ -227,35 +270,48 @@ const TasksPage: React.FC = () => {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const handleDragOver = (event: DragOverEvent) => {
+    const { over } = event
+    setOverId(over?.id?.toString() ?? null)
+  }
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setActiveTask(null)
+    setOverId(null)
     if (!over) return
 
     const draggedTask = tasks?.find(t => t.id === active.id)
-    const overStatus = statusColumns.find(s => s.key === over.id)?.key
+    // Detect drop target: column key or the task's parent column
+    const columnKey = statusColumns.find(s => s.key === over.id)?.key
       ?? tasks?.find(t => t.id === over.id)?.status
 
-    if (draggedTask && overStatus && draggedTask.status !== overStatus) {
-      updateStatus.mutate({ id: draggedTask.id, status: overStatus })
+    if (draggedTask && columnKey && draggedTask.status !== columnKey) {
+      updateStatus.mutate({ id: draggedTask.id, status: columnKey })
     }
   }
 
   const tasksByStatus = (status: Task['status']) =>
     (tasks ?? []).filter(t => t.status === status)
 
-  if (isLoading) return <div className="space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div>
+  if (isLoading) return (
+    <div className="space-y-3">
+      {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}
+    </div>
+  )
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-slide-up">
       {/* Toolbar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex gap-2">
           <Button variant={view === 'kanban' ? 'default' : 'outline'} size="sm" onClick={() => setView('kanban')}>
-            <LayoutGrid className="w-4 h-4 mr-2" /> Kanban
+            <LayoutGrid className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Kanban</span>
           </Button>
           <Button variant={view === 'list' ? 'default' : 'outline'} size="sm" onClick={() => setView('list')}>
-            <List className="w-4 h-4 mr-2" /> Lista
+            <List className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Lista</span>
           </Button>
         </div>
         <Button onClick={() => { setEditTask(null); setModalOpen(true) }}>
@@ -265,39 +321,49 @@ const TasksPage: React.FC = () => {
 
       {/* KANBAN */}
       {view === 'kanban' && (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}
-          onDragStart={e => setActiveTask(tasks?.find(t => t.id === e.active.id) ?? null)}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={e => setActiveTask(tasks?.find(t => t.id === e.active.id) ?? null)}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {statusColumns.map(col => (
-              <div key={col.key} className="bg-muted/40 rounded-xl p-3 min-h-64">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-sm text-foreground">{col.label}</h3>
-                  <Badge variant="secondary" className="text-xs">{tasksByStatus(col.key).length}</Badge>
-                </div>
-                <SortableContext items={tasksByStatus(col.key).map(t => t.id)} strategy={verticalListSortingStrategy}>
-                  {/* Droppable area */}
-                  <div
-                    id={col.key}
-                    data-droppable={col.key}
-                    className="space-y-2 min-h-16"
-                  >
-                    {tasksByStatus(col.key).map(task => (
-                      <SortableTaskCard
-                        key={task.id}
-                        task={task}
-                        onEdit={t => { setEditTask(t); setModalOpen(true) }}
-                        onDelete={setDeleteTask}
-                      />
-                    ))}
-                  </div>
+              <DroppableColumn
+                key={col.key}
+                id={col.key}
+                label={col.label}
+                count={tasksByStatus(col.key).length}
+                color={col.color}
+                isOver={overId === col.key}
+              >
+                <SortableContext
+                  items={tasksByStatus(col.key).map(t => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {tasksByStatus(col.key).length === 0 && !activeTask && (
+                    <p className="text-xs text-muted-foreground text-center py-4">Nenhuma tarefa</p>
+                  )}
+                  {tasksByStatus(col.key).map(task => (
+                    <SortableTaskCard
+                      key={task.id}
+                      task={task}
+                      onEdit={t => { setEditTask(t); setModalOpen(true) }}
+                      onDelete={setDeleteTask}
+                    />
+                  ))}
                 </SortableContext>
-              </div>
+              </DroppableColumn>
             ))}
           </div>
           <DragOverlay>
             {activeTask && (
-              <div className="bg-card border border-primary rounded-lg p-3 shadow-xl rotate-2 opacity-90">
+              <div className="bg-card border-2 border-primary rounded-lg p-3 shadow-2xl rotate-1 opacity-95">
                 <p className="text-sm font-medium">{activeTask.title}</p>
+                <Badge variant="outline" className={`text-xs mt-1 ${priorityConfig[activeTask.priority].class}`}>
+                  {priorityConfig[activeTask.priority].label}
+                </Badge>
               </div>
             )}
           </DragOverlay>
@@ -308,16 +374,28 @@ const TasksPage: React.FC = () => {
       {view === 'list' && (
         <div className="space-y-2">
           {(tasks ?? []).length === 0
-            ? <Card><CardContent className="py-12 text-center text-muted-foreground">Nenhuma tarefa criada</CardContent></Card>
+            ? (
+              <Card>
+                <EmptyState
+                  icon={CheckSquare}
+                  title="Nenhuma tarefa criada"
+                  description="Crie sua primeira tarefa clicando em Nova Tarefa."
+                  action={{ label: 'Nova Tarefa', onClick: () => { setEditTask(null); setModalOpen(true) } }}
+                />
+              </Card>
+            )
             : (tasks ?? []).map(task => {
               const isOverdue = task.due_at && new Date(task.due_at) < new Date() && task.status !== 'done'
               const pr = priorityConfig[task.priority]
               return (
-                <Card key={task.id} className={isOverdue ? 'border-destructive' : ''}>
+                <Card key={task.id} className={cn(
+                  'hover:shadow-md transition-all',
+                  isOverdue ? 'border-destructive' : ''
+                )}>
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <p className={`font-medium text-sm ${task.status === 'done' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
                             {task.title}
                           </p>
@@ -330,7 +408,7 @@ const TasksPage: React.FC = () => {
                           {task.project && <span>📁 {task.project}</span>}
                         </div>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 shrink-0">
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditTask(task); setModalOpen(true) }}>
                           <Pencil className="w-4 h-4" />
                         </Button>

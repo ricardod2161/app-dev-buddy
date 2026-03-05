@@ -14,10 +14,11 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, List } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { EmptyState } from '@/components/EmptyState'
 
 const phoneSchema = z.object({
   phone_e164: z.string().regex(/^\+55\d{10,11}$/, 'Formato inválido. Use +55XXXXXXXXXXX'),
@@ -53,7 +54,6 @@ const WhitelistPage: React.FC = () => {
   const addMutation = useMutation({
     mutationFn: async (data: PhoneForm) => {
       if (!workspaceId) throw new Error('Workspace não encontrado')
-      // Verificar duplicata
       const exists = whitelist?.some(w => w.phone_e164 === data.phone_e164)
       if (exists) throw new Error('Este número já está cadastrado')
       const { error } = await supabase.from('whitelist_numbers').insert({
@@ -95,7 +95,7 @@ const WhitelistPage: React.FC = () => {
   })
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-slide-up">
       {/* Toolbar */}
       <div className="flex justify-between items-center">
         <p className="text-sm text-muted-foreground">
@@ -111,52 +111,56 @@ const WhitelistPage: React.FC = () => {
         <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
       ) : (whitelist ?? []).length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <p>Nenhum número na whitelist</p>
-            <p className="text-xs mt-1">Adicione números para autorizar comandos via WhatsApp/Telegram</p>
-          </CardContent>
+          <EmptyState
+            icon={List}
+            title="Whitelist vazia"
+            description="Adicione números para autorizar comandos via WhatsApp/Telegram."
+            action={{ label: 'Adicionar Número', onClick: () => setAddOpen(true) }}
+          />
         </Card>
       ) : (
         <div className="border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground">Número</th>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground">Rótulo</th>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground">Status</th>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground">Adicionado em</th>
-                <th className="text-right py-3 px-4 font-medium text-muted-foreground">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {(whitelist ?? []).map(item => (
-                <tr key={item.id} className="bg-card hover:bg-muted/30 transition-colors">
-                  <td className="py-3 px-4 font-mono">{item.phone_e164}</td>
-                  <td className="py-3 px-4 text-muted-foreground">{item.label ?? '—'}</td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={item.is_active}
-                        onCheckedChange={checked => toggleMutation.mutate({ id: item.id, is_active: checked })}
-                      />
-                      <Badge variant={item.is_active ? 'default' : 'secondary'} className="text-xs">
-                        {item.is_active ? 'Ativo' : 'Inativo'}
-                      </Badge>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-muted-foreground text-xs">
-                    {format(new Date(item.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => setDeleteItem(item)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Número</th>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground hidden sm:table-cell">Rótulo</th>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Status</th>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground hidden md:table-cell">Adicionado em</th>
+                  <th className="text-right py-3 px-4 font-medium text-muted-foreground">Ações</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(whitelist ?? []).map(item => (
+                  <tr key={item.id} className="bg-card hover:bg-muted/30 transition-colors">
+                    <td className="py-3 px-4 font-mono text-xs sm:text-sm">{item.phone_e164}</td>
+                    <td className="py-3 px-4 text-muted-foreground hidden sm:table-cell">{item.label ?? '—'}</td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={item.is_active}
+                          onCheckedChange={checked => toggleMutation.mutate({ id: item.id, is_active: checked })}
+                        />
+                        <Badge variant={item.is_active ? 'default' : 'secondary'} className="text-xs hidden sm:inline-flex">
+                          {item.is_active ? 'Ativo' : 'Inativo'}
+                        </Badge>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-muted-foreground text-xs hidden md:table-cell">
+                      {format(new Date(item.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setDeleteItem(item)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
