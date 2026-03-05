@@ -253,8 +253,8 @@ const NotesPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
-  const [filterProject, setFilterProject] = useState('')
+  const [filterCategory, setFilterCategory] = useState('all')
+  const [filterProject, setFilterProject] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editNote, setEditNote] = useState<Note | null>(null)
   const [deleteNote, setDeleteNote] = useState<Note | null>(null)
@@ -303,8 +303,8 @@ const NotesPage: React.FC = () => {
   const filtered = (notes ?? []).filter(n => {
     const q = search.toLowerCase()
     const matchSearch = !q || (n.title ?? '').toLowerCase().includes(q) || (n.content ?? '').toLowerCase().includes(q)
-    const matchCat = !filterCategory || n.category === filterCategory
-    const matchProj = !filterProject || (n.project ?? '').toLowerCase().includes(filterProject.toLowerCase())
+    const matchCat = filterCategory === 'all' || n.category === filterCategory
+    const matchProj = filterProject === 'all' || (n.project ?? '').toLowerCase().includes(filterProject.toLowerCase())
     return matchSearch && matchCat && matchProj
   })
 
@@ -322,14 +322,14 @@ const NotesPage: React.FC = () => {
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-40"><SelectValue placeholder="Categoria" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todas</SelectItem>
+              <SelectItem value="all">Todas</SelectItem>
               {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filterProject} onValueChange={setFilterProject}>
             <SelectTrigger className="w-40"><SelectValue placeholder="Projeto" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos</SelectItem>
+              <SelectItem value="all">Todos</SelectItem>
               {projects.map(p => <SelectItem key={p!} value={p!}>{p}</SelectItem>)}
             </SelectContent>
           </Select>
