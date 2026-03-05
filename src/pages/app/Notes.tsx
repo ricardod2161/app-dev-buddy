@@ -322,14 +322,14 @@ const NotesPage: React.FC = () => {
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-40"><SelectValue placeholder="Categoria" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todas</SelectItem>
+              <SelectItem value="all">Todas</SelectItem>
               {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filterProject} onValueChange={setFilterProject}>
             <SelectTrigger className="w-40"><SelectValue placeholder="Projeto" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos</SelectItem>
+              <SelectItem value="all">Todos</SelectItem>
               {projects.map(p => <SelectItem key={p!} value={p!}>{p}</SelectItem>)}
             </SelectContent>
           </Select>
