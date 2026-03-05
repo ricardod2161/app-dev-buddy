@@ -1,5 +1,5 @@
 import React from 'react'
-import { Moon, Sun, LogOut, User } from 'lucide-react'
+import { Moon, Sun, LogOut, User, Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useLocation } from 'react-router-dom'
+import { useSidebarCtx } from '@/layouts/AppLayout'
 
 const pageTitles: Record<string, string> = {
   '/app': 'Dashboard',
@@ -30,6 +31,7 @@ export const TopBar: React.FC = () => {
   const { profile, signOut } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
+  const { toggleMobile } = useSidebarCtx()
 
   const title = pageTitles[location.pathname] ?? 'Assistente WhatsApp'
   const initials = profile?.name
@@ -37,10 +39,22 @@ export const TopBar: React.FC = () => {
     : 'U'
 
   return (
-    <header className="h-16 border-b border-border bg-card px-6 flex items-center justify-between shrink-0">
-      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-
+    <header className="h-16 border-b border-border bg-card px-4 sm:px-6 flex items-center justify-between shrink-0">
       <div className="flex items-center gap-3">
+        {/* Hamburger — mobile only */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+          onClick={toggleMobile}
+          title="Menu"
+        >
+          <Menu className="w-5 h-5" />
+        </Button>
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      </div>
+
+      <div className="flex items-center gap-2">
         {/* Toggle tema */}
         <Button variant="ghost" size="icon" onClick={toggleTheme} title="Alternar tema">
           {theme === 'dark'
