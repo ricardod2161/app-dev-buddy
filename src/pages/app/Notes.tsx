@@ -303,8 +303,8 @@ const NotesPage: React.FC = () => {
   const filtered = (notes ?? []).filter(n => {
     const q = search.toLowerCase()
     const matchSearch = !q || (n.title ?? '').toLowerCase().includes(q) || (n.content ?? '').toLowerCase().includes(q)
-    const matchCat = !filterCategory || n.category === filterCategory
-    const matchProj = !filterProject || (n.project ?? '').toLowerCase().includes(filterProject.toLowerCase())
+    const matchCat = filterCategory === 'all' || n.category === filterCategory
+    const matchProj = filterProject === 'all' || (n.project ?? '').toLowerCase().includes(filterProject.toLowerCase())
     return matchSearch && matchCat && matchProj
   })
 
