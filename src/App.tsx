@@ -6,12 +6,8 @@ import { AuthProvider } from "@/contexts/AuthContext"
 import { ThemeProvider } from "@/contexts/ThemeContext"
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
-
-// Auth pages
 import LoginPage from "@/pages/auth/Login"
 import RegisterPage from "@/pages/auth/Register"
-
-// App pages
 import DashboardPage from "@/pages/app/Dashboard"
 import NotesPage from "@/pages/app/Notes"
 import TasksPage from "@/pages/app/Tasks"
@@ -24,12 +20,7 @@ import LogsPage from "@/pages/app/Logs"
 import NotFound from "./pages/NotFound"
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60,
-      retry: 1,
-    },
-  },
+  defaultOptions: { queries: { staleTime: 1000 * 60, retry: 1 } },
 })
 
 const App = () => (
@@ -40,16 +31,11 @@ const App = () => (
           <Sonner richColors position="top-right" />
           <BrowserRouter>
             <Routes>
-              {/* Rota raiz → redirecionar para app */}
               <Route path="/" element={<Navigate to="/app" replace />} />
-
-              {/* Rotas de autenticação */}
               <Route element={<AuthLayout />}>
                 <Route path="/auth/login" element={<LoginPage />} />
                 <Route path="/auth/register" element={<RegisterPage />} />
               </Route>
-
-              {/* Rotas protegidas do app */}
               <Route element={<AppLayout />}>
                 <Route path="/app" element={<DashboardPage />} />
                 <Route path="/app/notes" element={<NotesPage />} />
@@ -61,7 +47,6 @@ const App = () => (
                 <Route path="/app/settings" element={<SettingsPage />} />
                 <Route path="/app/logs" element={<LogsPage />} />
               </Route>
-
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
