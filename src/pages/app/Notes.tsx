@@ -16,10 +16,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Pencil, Trash2, ArrowRight, Search, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, ArrowRight, Search, X, FileText } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import { EmptyState } from '@/components/EmptyState'
+import { stripHtml, truncate } from '@/lib/utils'
 
 // --- TipTap Editor ---
 const RichEditor: React.FC<{ content: string; onChange: (v: string) => void }> = ({ content, onChange }) => {
@@ -34,7 +36,6 @@ const RichEditor: React.FC<{ content: string; onChange: (v: string) => void }> =
 
   return (
     <div className="border rounded-md">
-      {/* Toolbar */}
       <div className="flex gap-1 p-2 border-b bg-muted/50">
         {[
           { label: 'N', title: 'Negrito', action: () => editor?.chain().focus().toggleBold().run(), active: editor?.isActive('bold') },
@@ -74,7 +75,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
   const qc = useQueryClient()
   const [title, setTitle] = useState(note?.title ?? '')
   const [content, setContent] = useState(note?.content ?? '')
-  const [category, setCategory] = useState(note?.category ?? '')
+  const [category, setCategory] = useState(note?.category ?? 'none')
   const [project, setProject] = useState(note?.project ?? '')
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>(note?.tags ?? [])
@@ -84,7 +85,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
     if (open) {
       setTitle(note?.title ?? '')
       setContent(note?.content ?? '')
-      setCategory(note?.category ?? '')
+      setCategory(note?.category ?? 'none')
       setProject(note?.project ?? '')
       setTags(note?.tags ?? [])
       setTagInput('')
@@ -100,18 +101,20 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
   const save = async () => {
     if (!title.trim()) { toast.error('Título é obrigatório'); return }
     setLoading(true)
+    const catValue = category === 'none' ? null : category
     try {
       if (note) {
-        const { error } = await supabase.from('notes').update({ title, content, category, project, tags }).eq('id', note.id)
+        const { error } = await supabase.from('notes').update({ title, content, category: catValue, project, tags }).eq('id', note.id)
         if (error) throw error
         toast.success('Nota atualizada')
       } else {
-        const { error } = await supabase.from('notes').insert({ workspace_id: workspaceId, title, content, category, project, tags })
+        const { error } = await supabase.from('notes').insert({ workspace_id: workspaceId, title, content, category: catValue, project, tags })
         if (error) throw error
         toast.success('Nota criada')
       }
       qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
       onClose()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao salvar nota')
@@ -122,7 +125,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{note ? 'Editar Nota' : 'Nova Nota'}</DialogTitle>
         </DialogHeader>
@@ -137,7 +140,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
               <RichEditor content={content} onChange={setContent} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Categoria</Label>
               <Select value={category} onValueChange={setCategory}>
@@ -145,6 +148,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
                   <SelectValue placeholder="Selecionar..." />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="none">Sem categoria</SelectItem>
                   {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -277,8 +281,7 @@ const NotesPage: React.FC = () => {
     queryFn: async () => {
       if (!workspaceId) return []
       const { data, error } = await supabase
-        .from('notes')
-        .select('*')
+        .from('notes').select('*')
         .eq('workspace_id', workspaceId)
         .order('created_at', { ascending: false })
       if (error) throw error
@@ -311,30 +314,32 @@ const NotesPage: React.FC = () => {
   const projects = [...new Set((notes ?? []).map(n => n.project).filter(Boolean))]
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-slide-up">
       {/* Toolbar */}
       <div className="flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex flex-wrap gap-2 flex-1">
-          <div className="relative flex-1 min-w-48 max-w-xs">
+        <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+          <div className="relative flex-1 min-w-40 max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input className="pl-9" placeholder="Buscar notas..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className="w-40"><SelectValue placeholder="Categoria" /></SelectTrigger>
+            <SelectTrigger className="w-36 sm:w-40"><SelectValue placeholder="Categoria" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas</SelectItem>
               {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={filterProject} onValueChange={setFilterProject}>
-            <SelectTrigger className="w-40"><SelectValue placeholder="Projeto" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {projects.map(p => <SelectItem key={p!} value={p!}>{p}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          {projects.length > 0 && (
+            <Select value={filterProject} onValueChange={setFilterProject}>
+              <SelectTrigger className="w-36 sm:w-40"><SelectValue placeholder="Projeto" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {projects.map(p => <SelectItem key={p!} value={p!}>{p}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
         </div>
-        <Button onClick={() => { setEditNote(null); setModalOpen(true) }}>
+        <Button onClick={() => { setEditNote(null); setModalOpen(true) }} className="shrink-0">
           <Plus className="w-4 h-4 mr-2" /> Nova Nota
         </Button>
       </div>
@@ -345,44 +350,57 @@ const NotesPage: React.FC = () => {
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
         </div>
       ) : filtered.length === 0 ? (
-        <Card><CardContent className="py-12 text-center text-muted-foreground">Nenhuma nota encontrada</CardContent></Card>
+        <Card>
+          <EmptyState
+            icon={FileText}
+            title="Nenhuma nota encontrada"
+            description={search || filterCategory !== 'all' ? 'Tente ajustar os filtros de busca.' : 'Crie sua primeira nota clicando em "Nova Nota".'}
+            action={!search && filterCategory === 'all' ? { label: 'Nova Nota', onClick: () => { setEditNote(null); setModalOpen(true) } } : undefined}
+          />
+        </Card>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(note => (
-            <Card key={note.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="py-4 px-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-foreground truncate">{note.title ?? '(sem título)'}</h3>
-                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                      {note.category && <Badge variant="outline" className="text-xs">{note.category}</Badge>}
-                      {note.project && <span className="text-xs text-muted-foreground">📁 {note.project}</span>}
-                      {(note.tags as string[]).map(tag => (
-                        <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                      ))}
+        <div className="grid grid-cols-1 gap-3">
+          {filtered.map(note => {
+            const preview = truncate(stripHtml(note.content ?? ''), 100)
+            return (
+              <Card key={note.id} className="hover:shadow-md transition-all hover:-translate-y-0.5 duration-150">
+                <CardContent className="py-4 px-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground truncate">{note.title ?? '(sem título)'}</h3>
+                      {preview && (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{preview}</p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        {note.category && <Badge variant="outline" className="text-xs">{note.category}</Badge>}
+                        {note.project && <span className="text-xs text-muted-foreground">📁 {note.project}</span>}
+                        {(note.tags as string[]).map(tag => (
+                          <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                        ))}
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {format(new Date(note.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                        </span>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {format(new Date(note.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                    </p>
+                    <div className="flex gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Transformar em tarefa"
+                        onClick={() => setTaskNote(note)}>
+                        <ArrowRight className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Editar"
+                        onClick={() => { setEditNote(note); setModalOpen(true) }}>
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir"
+                        onClick={() => setDeleteNote(note)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" title="Transformar em tarefa"
-                      onClick={() => setTaskNote(note)}>
-                      <ArrowRight className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" title="Editar"
-                      onClick={() => { setEditNote(note); setModalOpen(true) }}>
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir"
-                      onClick={() => setDeleteNote(note)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 
@@ -408,7 +426,6 @@ const NotesPage: React.FC = () => {
         </>
       )}
 
-      {/* Confirmação de exclusão */}
       <Dialog open={!!deleteNote} onOpenChange={v => !v && setDeleteNote(null)}>
         <DialogContent>
           <DialogHeader>
