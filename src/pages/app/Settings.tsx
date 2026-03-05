@@ -46,7 +46,7 @@ const SettingsPage: React.FC = () => {
     }
   }, [settings])
 
-  const timezones = Intl.supportedValuesOf('timeZone')
+  const timezones = (Intl as unknown as { supportedValuesOf: (k: string) => string[] }).supportedValuesOf('timeZone')
 
   const save = async () => {
     if (!workspaceId) return
