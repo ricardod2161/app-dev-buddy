@@ -482,298 +482,325 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       userContent = effectiveText ?? ''
     }
 
-    // ── 8. Call AI with expanded toolset ─────────────────────────────────────
+    // ── 8. Call AI with expanded toolset + failover ───────────────────────────
     const aiMessages = [
       { role: 'system', content: systemPrompt },
       ...conversationMessages,
       { role: 'user', content: userContent },
     ]
 
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
-        messages: aiMessages,
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'create_note',
-              description: 'Cria uma nota/anotação. Use também para registrar gastos financeiros (category="Financeiro").',
-              parameters: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string', description: 'Título curto e descritivo' },
-                  content: { type: 'string', description: 'Conteúdo completo. Para gastos: liste cada item com valor.' },
-                  category: { type: 'string', description: 'Categoria: Trabalho, Pessoal, Ideia, Reunião, Financeiro, Saúde, Compras, etc.' },
-                  tags: { type: 'array', items: { type: 'string' }, description: 'Tags opcionais' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável para o usuário' },
-                },
-                required: ['title', 'content', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'create_task',
-              description: 'Cria uma tarefa/afazer com prioridade e prazo opcionais.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string', description: 'Título da tarefa' },
-                  description: { type: 'string', description: 'Descrição detalhada (opcional)' },
-                  priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Prioridade' },
-                  due_at: { type: 'string', description: 'Vencimento em ISO 8601 (opcional)' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável' },
-                },
-                required: ['title', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'create_reminder',
-              description: 'Cria um lembrete para notificar o usuário em data/hora específica. Sempre extraia a data precisa.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string', description: 'Título do lembrete' },
-                  message: { type: 'string', description: 'Mensagem que será enviada ao usuário no horário' },
-                  remind_at: { type: 'string', description: 'Data/hora exata em ISO 8601 (ex: 2026-03-07T10:00:00)' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável com data/hora formatada' },
-                },
-                required: ['title', 'message', 'remind_at', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'update_task_status',
-              description: 'Marca uma tarefa como concluída, em andamento ou a fazer. Use quando usuário diz "concluí", "terminei", "fiz", etc.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  task_title: { type: 'string', description: 'Título ou parte do título da tarefa para localizar' },
-                  new_status: { type: 'string', enum: ['todo', 'in_progress', 'done'], description: 'Novo status' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável' },
-                },
-                required: ['task_title', 'new_status', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'search_notes',
-              description: 'Busca notas por palavra-chave no título ou conteúdo. Use quando usuário pergunta sobre algo específico.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  query: { type: 'string', description: 'Palavra-chave para buscar nas notas' },
-                  category: { type: 'string', description: 'Filtrar por categoria (opcional)' },
-                  reply_message: { type: 'string', description: 'Texto introdutório antes dos resultados' },
-                },
-                required: ['query', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'financial_summary',
-              description: 'Calcula e exibe o total de gastos registrados como notas Financeiras. Use quando usuário pede relatório de gastos.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  period: { type: 'string', enum: ['hoje', 'semana', 'mes'], description: 'Período para calcular' },
-                  reply_message: { type: 'string', description: 'Introdução antes do relatório' },
-                },
-                required: ['period', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'list_notes',
-              description: 'Lista notas recentes do usuário, opcionalmente filtradas por categoria.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  category: { type: 'string', description: 'Filtrar por categoria (opcional)' },
-                  reply_message: { type: 'string', description: 'Resumo formatado para o usuário' },
-                },
-                required: ['reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'list_tasks',
-              description: 'Lista tarefas pendentes ou concluídas do usuário.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'pending'], description: 'Filtrar por status (opcional)' },
-                  reply_message: { type: 'string', description: 'Resumo formatado' },
-                },
-                required: ['reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'list_reminders',
-              description: 'Lista os próximos lembretes agendados do usuário.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  reply_message: { type: 'string', description: 'Resumo formatado dos lembretes' },
-                },
-                required: ['reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'cancel_reminder',
-              description: 'Cancela/remove um lembrete existente pelo título.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  reminder_title: { type: 'string', description: 'Título ou parte do título do lembrete' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável' },
-                },
-                required: ['reminder_title', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'just_reply',
-              description: 'Responde ao usuário sem nenhuma ação de criação/edição. Use APENAS para: (1) perguntas e conversas casuais, (2) áudios que são exclusivamente perguntas, (3) situações onde nenhuma outra ferramenta se aplica. ⛔ NÃO use para áudios com conteúdo substancial.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  message: { type: 'string', description: 'Resposta para o usuário' },
-                },
-                required: ['message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'save_transcript',
-              description: 'Salva a transcrição/conteúdo de um áudio como nota estruturada. Use quando o áudio contém conteúdo substancial (reflexão, ideia, relato, plano) que NÃO é um comando direto. Preferir este tool em vez de just_reply para áudios com mais de 3 frases.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string', description: 'Título descritivo e conciso resumindo o tema do áudio' },
-                  transcript: { type: 'string', description: 'Transcrição completa ou conteúdo fiel do áudio' },
-                  summary: { type: 'string', description: 'Resumo de 2-3 frases destacando os pontos principais' },
-                  category: { type: 'string', description: 'Categoria mais adequada: Pessoal, Ideia, Trabalho, Reunião, etc.' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável com resumo do que foi salvo, perguntando se quer criar tarefas/lembretes relacionados' },
-                },
-                required: ['title', 'transcript', 'summary', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'delete_note',
-              description: 'Remove/deleta uma nota existente pelo título. Use quando usuário pede para apagar, deletar ou remover uma nota.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  note_title: { type: 'string', description: 'Título ou parte do título da nota a ser removida' },
-                  reply_message: { type: 'string', description: 'Confirmação amigável após deletar' },
-                },
-                required: ['note_title', 'reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-          {
-            type: 'function',
-            function: {
-              name: 'weekly_summary',
-              description: 'Gera um resumo completo da semana: tarefas concluídas, novas notas, gastos totais e lembretes disparados. Use quando o usuário pedir "resumo da semana", "o que fiz essa semana", "resumo semanal".',
-              parameters: {
-                type: 'object',
-                properties: {
-                  reply_message: { type: 'string', description: 'Introdução amigável antes do resumo (ex: "Aqui está seu resumo da semana 📊")' },
-                },
-                required: ['reply_message'],
-                additionalProperties: false,
-              },
-            },
-          },
-        ],
-        tool_choice: 'required',
-      }),
-    })
+    // Models to try in order — gemini-3-flash-preview first (fastest), then fallbacks
+    const AI_MODELS = [
+      'google/gemini-3-flash-preview',
+      'google/gemini-2.5-flash',
+      'openai/gpt-5-mini',
+    ]
 
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text()
-      console.error('AI gateway error:', aiResponse.status, errText)
-      // If rate limited or payment required, send friendly message
-      if (aiResponse.status === 429) {
-        const fallback = '⚠️ Estou sobrecarregada no momento. Tente novamente em alguns segundos!'
-        await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
-        await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
-        return new Response(JSON.stringify({ ok: false, error: 'rate_limited' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    const toolDefinitions = [
+      {
+        type: 'function',
+        function: {
+          name: 'create_note',
+          description: 'Cria uma nota/anotação. Use também para registrar gastos financeiros (category="Financeiro").',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Título curto e descritivo' },
+              content: { type: 'string', description: 'Conteúdo completo. Para gastos: liste cada item com valor.' },
+              category: { type: 'string', description: 'Categoria: Trabalho, Pessoal, Ideia, Reunião, Financeiro, Saúde, Compras, etc.' },
+              tags: { type: 'array', items: { type: 'string' }, description: 'Tags opcionais' },
+              reply_message: { type: 'string', description: 'Confirmação amigável para o usuário' },
+            },
+            required: ['title', 'content', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'create_task',
+          description: 'Cria uma tarefa/afazer com prioridade e prazo opcionais.',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Título da tarefa' },
+              description: { type: 'string', description: 'Descrição detalhada (opcional)' },
+              priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Prioridade' },
+              due_at: { type: 'string', description: 'Vencimento em ISO 8601 (opcional)' },
+              reply_message: { type: 'string', description: 'Confirmação amigável' },
+            },
+            required: ['title', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'create_reminder',
+          description: 'Cria um lembrete para notificar o usuário em data/hora específica.',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Título do lembrete' },
+              message: { type: 'string', description: 'Mensagem que será enviada ao usuário no horário' },
+              remind_at: { type: 'string', description: 'Data/hora exata em ISO 8601 (ex: 2026-03-07T10:00:00)' },
+              reply_message: { type: 'string', description: 'Confirmação amigável com data/hora formatada' },
+            },
+            required: ['title', 'message', 'remind_at', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'update_task_status',
+          description: 'Marca uma tarefa como concluída, em andamento ou a fazer.',
+          parameters: {
+            type: 'object',
+            properties: {
+              task_title: { type: 'string', description: 'Título ou parte do título da tarefa para localizar' },
+              new_status: { type: 'string', enum: ['todo', 'in_progress', 'done'], description: 'Novo status' },
+              reply_message: { type: 'string', description: 'Confirmação amigável' },
+            },
+            required: ['task_title', 'new_status', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_notes',
+          description: 'Busca notas por palavra-chave no título ou conteúdo.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Palavra-chave para buscar nas notas' },
+              category: { type: 'string', description: 'Filtrar por categoria (opcional)' },
+              reply_message: { type: 'string', description: 'Texto introdutório antes dos resultados' },
+            },
+            required: ['query', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'financial_summary',
+          description: 'Calcula e exibe o total de gastos registrados como notas Financeiras.',
+          parameters: {
+            type: 'object',
+            properties: {
+              period: { type: 'string', enum: ['hoje', 'semana', 'mes'], description: 'Período para calcular' },
+              reply_message: { type: 'string', description: 'Introdução antes do relatório' },
+            },
+            required: ['period', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_notes',
+          description: 'Lista notas recentes do usuário, opcionalmente filtradas por categoria.',
+          parameters: {
+            type: 'object',
+            properties: {
+              category: { type: 'string', description: 'Filtrar por categoria (opcional)' },
+              reply_message: { type: 'string', description: 'Resumo formatado para o usuário' },
+            },
+            required: ['reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_tasks',
+          description: 'Lista tarefas pendentes ou concluídas do usuário.',
+          parameters: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'pending'], description: 'Filtrar por status (opcional)' },
+              reply_message: { type: 'string', description: 'Resumo formatado' },
+            },
+            required: ['reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_reminders',
+          description: 'Lista os próximos lembretes agendados do usuário.',
+          parameters: {
+            type: 'object',
+            properties: {
+              reply_message: { type: 'string', description: 'Resumo formatado dos lembretes' },
+            },
+            required: ['reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'cancel_reminder',
+          description: 'Cancela/remove um lembrete existente pelo título.',
+          parameters: {
+            type: 'object',
+            properties: {
+              reminder_title: { type: 'string', description: 'Título ou parte do título do lembrete' },
+              reply_message: { type: 'string', description: 'Confirmação amigável' },
+            },
+            required: ['reminder_title', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'just_reply',
+          description: 'Responde ao usuário sem nenhuma ação. Use para perguntas, conversas casuais ou quando nenhuma outra ferramenta se aplica.',
+          parameters: {
+            type: 'object',
+            properties: {
+              message: { type: 'string', description: 'Resposta para o usuário' },
+            },
+            required: ['message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'save_transcript',
+          description: 'Salva a transcrição/conteúdo de um áudio como nota estruturada.',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Título descritivo resumindo o tema do áudio' },
+              transcript: { type: 'string', description: 'Transcrição completa ou conteúdo fiel do áudio' },
+              summary: { type: 'string', description: 'Resumo de 2-3 frases dos pontos principais' },
+              category: { type: 'string', description: 'Categoria mais adequada: Pessoal, Ideia, Trabalho, Reunião, etc.' },
+              reply_message: { type: 'string', description: 'Confirmação amigável com resumo do que foi salvo' },
+            },
+            required: ['title', 'transcript', 'summary', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'delete_note',
+          description: 'Remove/deleta uma nota existente pelo título.',
+          parameters: {
+            type: 'object',
+            properties: {
+              note_title: { type: 'string', description: 'Título ou parte do título da nota a ser removida' },
+              reply_message: { type: 'string', description: 'Confirmação amigável após deletar' },
+            },
+            required: ['note_title', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'weekly_summary',
+          description: 'Gera um resumo completo da semana: tarefas concluídas, novas notas, gastos totais.',
+          parameters: {
+            type: 'object',
+            properties: {
+              reply_message: { type: 'string', description: 'Introdução amigável antes do resumo' },
+            },
+            required: ['reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+    ]
+
+    // ── AI call with model failover ───────────────────────────────────────────
+    let fnName = 'just_reply'
+    let fnArgs: Record<string, unknown> = { message: 'Olá! Como posso ajudar? 😊' }
+    let aiCallSuccess = false
+
+    for (const model of AI_MODELS) {
+      if (aiCallSuccess) break
+      try {
+        console.log(`[AI] Trying model: ${model}`)
+        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: aiMessages,
+            tools: toolDefinitions,
+            tool_choice: 'required',
+          }),
+        })
+
+        if (!aiResponse.ok) {
+          const errText = await aiResponse.text()
+          console.warn(`[AI] Model ${model} failed: HTTP ${aiResponse.status} — ${errText.slice(0, 200)}`)
+          // Don't retry on payment/quota errors
+          if (aiResponse.status === 429 || aiResponse.status === 402) {
+            const fallback = aiResponse.status === 429
+              ? '⚠️ Estou sobrecarregada no momento. Tente novamente em alguns segundos!'
+              : '⚠️ Créditos de IA esgotados. Por favor, verifique as configurações.'
+            await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
+            await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
+            return new Response(JSON.stringify({ ok: false, error: aiResponse.status === 429 ? 'rate_limited' : 'payment_required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+          }
+          continue // Try next model
+        }
+
+        const aiData = await aiResponse.json()
+        const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0]
+
+        if (!toolCall) {
+          // No tool call — use content as just_reply
+          const rawContent = aiData.choices?.[0]?.message?.content
+          console.warn(`[AI] Model ${model} returned no tool_call — using content as reply`)
+          fnName = 'just_reply'
+          fnArgs = { message: rawContent?.trim() || 'Como posso ajudar? 😊' }
+          aiCallSuccess = true
+        } else {
+          fnName = toolCall.function.name
+          try {
+            fnArgs = JSON.parse(toolCall.function.arguments)
+            aiCallSuccess = true
+            console.log(`[AI] Model ${model} → tool=${fnName}`)
+          } catch (parseErr) {
+            console.error(`[AI] Model ${model} returned unparseable args:`, toolCall.function.arguments?.slice(0, 200))
+            // Try next model
+          }
+        }
+      } catch (fetchErr) {
+        console.error(`[AI] Model ${model} fetch exception:`, fetchErr)
+        // Try next model
       }
-      if (aiResponse.status === 402) {
-        const fallback = '⚠️ Créditos de IA esgotados. Por favor, verifique as configurações do workspace.'
-        await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
-        await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
-        return new Response(JSON.stringify({ ok: false, error: 'payment_required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-      }
-      throw new Error(`AI error ${aiResponse.status}: ${errText}`)
     }
 
-    const aiData = await aiResponse.json()
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0]
-
-    // Robust fallback: if no tool_call, extract text content and use just_reply
-    let fnName: string
-    let fnArgs: Record<string, unknown>
-    if (!toolCall) {
-      const rawContent = aiData.choices?.[0]?.message?.content
-      console.warn('No tool call returned by AI — falling back to content reply:', JSON.stringify(aiData).slice(0, 400))
-      fnName = 'just_reply'
-      fnArgs = { message: rawContent ?? 'Olá! Como posso ajudar? 😊' }
-    } else {
-      fnName = toolCall.function.name
-      try {
-        fnArgs = JSON.parse(toolCall.function.arguments)
-      } catch (parseErr) {
-        console.error('Failed to parse tool arguments JSON:', toolCall.function.arguments, parseErr)
-        fnName = 'just_reply'
-        fnArgs = { message: 'Desculpe, ocorreu um erro ao processar sua mensagem. Pode repetir?' }
-      }
+    // If all models failed, send a helpful fallback
+    if (!aiCallSuccess) {
+      const fallback = '😔 Não consegui processar sua mensagem agora. Tente novamente em instantes!'
+      await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
+      await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
+      return new Response(JSON.stringify({ ok: false, error: 'all_models_failed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     let replyText = ''
