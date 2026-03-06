@@ -631,8 +631,8 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
     // ── 9. Execute chosen action ──────────────────────────────────────────────
     if (fnName === 'create_note') {
-      // Auto-detect financial content
-      const isFinancial = fnArgs.category === 'Financeiro' || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
+      // Auto-detect financial content — use normalizeFinancialCategory + keyword scan
+      const isFinancial = normalizeFinancialCategory(fnArgs.category) || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
       const finalCategory = isFinancial ? 'Financeiro' : (fnArgs.category ?? 'Geral')
 
       const { error: noteErr } = await supabase.from('notes').insert({
