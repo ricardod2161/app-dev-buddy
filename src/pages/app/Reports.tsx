@@ -71,50 +71,17 @@ const ReportsPage: React.FC = () => {
     if (!workspaceId) return
     setGenerating(true)
     try {
-      const start = new Date(startDate)
-      const end = new Date(endDate + 'T23:59:59')
-
-      // Buscar dados
-      const [notesRes, tasksRes, remindersRes] = await Promise.all([
-        supabase.from('notes').select('*').eq('workspace_id', workspaceId)
-          .gte('created_at', start.toISOString()).lte('created_at', end.toISOString()),
-        supabase.from('tasks').select('*').eq('workspace_id', workspaceId),
-        supabase.from('reminders').select('*').eq('workspace_id', workspaceId)
-          .gte('remind_at', start.toISOString()).lte('remind_at', end.toISOString()),
-      ])
-
-      const notes = notesRes.data ?? []
-      const allTasks = tasksRes.data ?? []
-      const doneTasks = allTasks.filter(t => t.status === 'done' && t.completed_at && new Date(t.completed_at) >= start && new Date(t.completed_at) <= end)
-      const pendingTasks = allTasks.filter(t => t.status !== 'done')
-      const reminders = remindersRes.data ?? []
-
-      const content = `📊 *Relatório ${typeLabels[reportType]} — ${format(start, 'dd/MM/yyyy', { locale: ptBR })} a ${format(end, 'dd/MM/yyyy', { locale: ptBR })}*
-Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-
-📝 *Notas (${notes.length})*
-${notes.map(n => `• ${n.title ?? '(sem título)'} — ${n.category ?? 'sem categoria'} — ${format(new Date(n.created_at), 'dd/MM/yyyy', { locale: ptBR })}`).join('\n') || '• Nenhuma nota no período'}
-
-✅ *Tarefas concluídas (${doneTasks.length})*
-${doneTasks.map(t => `• ${t.title} — concluída em: ${t.completed_at ? format(new Date(t.completed_at), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}`).join('\n') || '• Nenhuma tarefa concluída'}
-
-⏳ *Tarefas pendentes (${pendingTasks.length})*
-${pendingTasks.map(t => `• ${t.title} — prazo: ${t.due_at ? format(new Date(t.due_at), 'dd/MM/yyyy', { locale: ptBR }) : 'sem prazo'} — prioridade: ${t.priority}`).join('\n') || '• Nenhuma tarefa pendente'}
-
-⏰ *Lembretes do período (${reminders.length})*
-${reminders.map(r => `• ${r.message} — ${r.status === 'sent' ? `disparado em: ${format(new Date(r.remind_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}` : `agendado para: ${format(new Date(r.remind_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`}`).join('\n') || '• Nenhum lembrete'}
-
----
-Total de atividades: ${notes.length + doneTasks.length + pendingTasks.length + reminders.length}`
-
-      setGeneratedContent(content)
-
-      // Salvar
-      const { error } = await supabase.from('reports').insert({
-        workspace_id: workspaceId, type: reportType,
-        period_start: startDate, period_end: endDate, content,
+      const { data: result, error } = await supabase.functions.invoke('generate-report', {
+        body: {
+          workspace_id: workspaceId,
+          report_type: reportType,
+          period_start: startDate,
+          period_end: endDate,
+        },
       })
       if (error) throw error
+      if (!result?.ok) throw new Error(result?.error ?? 'Erro ao gerar relatório')
+      setGeneratedContent(result.report?.content ?? '')
       toast.success('Relatório gerado e salvo!')
       qc.invalidateQueries({ queryKey: ['reports', workspaceId] })
     } catch (e: unknown) {

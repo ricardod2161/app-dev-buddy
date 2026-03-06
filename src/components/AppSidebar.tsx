@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, FileText, CheckSquare, BarChart3, MessageSquare,
   Settings, List, Hash, ScrollText, ChevronLeft, ChevronRight,
-  MessageCircle, X,
+  MessageCircle, X, Bell,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', path: '/app', icon: LayoutDashboard },
   { label: 'Notas', path: '/app/notes', icon: FileText },
   { label: 'Tarefas', path: '/app/tasks', icon: CheckSquare },
+  { label: 'Lembretes', path: '/app/reminders', icon: Bell },
   { label: 'Relatórios', path: '/app/reports', icon: BarChart3 },
   { label: 'Conversas', path: '/app/conversations', icon: MessageSquare },
   { label: 'Integrações', path: '/app/integrations', icon: MessageCircle },
