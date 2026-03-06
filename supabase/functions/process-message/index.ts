@@ -952,7 +952,8 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     // Triggers when: (a) user sent audio, OR (b) user explicitly requested audio reply in text
     const ttsEnabled = (settings as Record<string, unknown>)?.tts_enabled === true
     const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'nPczCjzI2devNBz1zQrb'
-    const userRequestedAudio = message_type === 'text' && /respond[ae]\s*(em\s*)?[áa]udio|manda\s*(em\s*)?[áa]udio|fala\s*(em\s*)?[áa]udio|me\s*(mand[ae]|respond[ae])\s*(em\s*)?[áa]udio|em\s*[áa]udio|via\s*[áa]udio|[áa]udio\s*(please|pf|pfv|por\s*favor)?/i.test(message_text ?? '')
+    // Detect user request for audio reply — broad match including "mim responda em áudio", "me fala em audio", etc.
+    const userRequestedAudio = message_type === 'text' && /[áa][u]?[d]?[i]?[o]|respond[ae].*[áa]udio|[áa]udio.*respond|mim\s+respond|me\s+respond.*[áa]udio|fala.*[áa]udio|[áa]udio.*fala|manda.*[áa]udio|[áa]udio.*manda|em\s+[áa]udio|voz\s*(please|pf|pfv|por\s*favor)?/i.test(message_text ?? '')
     const shouldSendAudio = ttsEnabled && (message_type === 'audio' || userRequestedAudio)
     if (shouldSendAudio) {
       try {
@@ -1101,8 +1102,8 @@ async function sendAudioReply({
     }
 
     if (integration.provider === 'EVOLUTION') {
-      // Evolution API: send as audio media with base64 data URI
-      await fetch(`${integration.api_url}/message/sendMedia/${integration.instance_id}`, {
+      // Evolution API: send as WhatsApp audio (PTT voice note) via sendWhatsAppAudio
+      const audioRes = await fetch(`${integration.api_url}/message/sendWhatsAppAudio/${integration.instance_id}`, {
         method: 'POST',
         headers: {
           apikey: (integration.api_key_encrypted as string) ?? '',
@@ -1110,11 +1111,29 @@ async function sendAudioReply({
         },
         body: JSON.stringify({
           number: phone,
-          mediatype: 'audio',
-          media: `data:${content_type};base64,${base64}`,
-          mimetype: content_type,
+          audio: base64,
+          encoding: true,
         }),
       })
+      if (!audioRes.ok) {
+        const errText = await audioRes.text()
+        console.warn(`sendWhatsAppAudio failed (${audioRes.status}):`, errText.slice(0, 300))
+        // Fallback: try sendMedia
+        await fetch(`${integration.api_url}/message/sendMedia/${integration.instance_id}`, {
+          method: 'POST',
+          headers: {
+            apikey: (integration.api_key_encrypted as string) ?? '',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            number: phone,
+            mediatype: 'audio',
+            media: `data:${content_type};base64,${base64}`,
+            mimetype: content_type,
+            fileName: 'audio.mp3',
+          }),
+        })
+      }
     } else if (integration.provider === 'TELEGRAM') {
       // Telegram: sendVoice via multipart FormData with binary blob
       const chatId = phone.startsWith('tg:') ? phone.slice(3) : phone
