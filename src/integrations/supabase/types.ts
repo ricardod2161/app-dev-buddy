@@ -597,6 +597,9 @@ export type Database = {
           bot_personality: string | null
           bot_response_format: string | null
           created_at: string | null
+          daily_briefing_enabled: boolean
+          daily_briefing_last_sent: string | null
+          daily_briefing_time: string
           default_categories: Json | null
           default_tags: Json | null
           id: string
@@ -612,6 +615,9 @@ export type Database = {
           bot_personality?: string | null
           bot_response_format?: string | null
           created_at?: string | null
+          daily_briefing_enabled?: boolean
+          daily_briefing_last_sent?: string | null
+          daily_briefing_time?: string
           default_categories?: Json | null
           default_tags?: Json | null
           id?: string
@@ -627,6 +633,9 @@ export type Database = {
           bot_personality?: string | null
           bot_response_format?: string | null
           created_at?: string | null
+          daily_briefing_enabled?: boolean
+          daily_briefing_last_sent?: string | null
+          daily_briefing_time?: string
           default_categories?: Json | null
           default_tags?: Json | null
           id?: string
