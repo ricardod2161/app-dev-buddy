@@ -553,6 +553,7 @@ export type Database = {
       workspace_settings: {
         Row: {
           bot_name: string | null
+          bot_personality: string | null
           bot_response_format: string | null
           created_at: string | null
           default_categories: Json | null
@@ -565,6 +566,7 @@ export type Database = {
         }
         Insert: {
           bot_name?: string | null
+          bot_personality?: string | null
           bot_response_format?: string | null
           created_at?: string | null
           default_categories?: Json | null
@@ -577,6 +579,7 @@ export type Database = {
         }
         Update: {
           bot_name?: string | null
+          bot_personality?: string | null
           bot_response_format?: string | null
           created_at?: string | null
           default_categories?: Json | null
