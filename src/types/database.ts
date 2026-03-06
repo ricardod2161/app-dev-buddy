@@ -152,6 +152,7 @@ export interface WorkspaceSettings {
   default_tags: string[]
   bot_response_format: 'curto' | 'medio' | 'detalhado'
   bot_name: string
+  bot_personality: string | null
   timezone: string
   language: string
   created_at: string
