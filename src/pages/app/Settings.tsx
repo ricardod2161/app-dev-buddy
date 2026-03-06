@@ -12,7 +12,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { X, Plus, Save, Loader2, Search, Bot, Sparkles } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2 } from 'lucide-react'
+
+const TTS_VOICES = [
+  { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian', gender: 'Masculina' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', label: 'George', gender: 'Masculina' },
+  { id: 'IKne3meq5aSn9XLyUdCD', label: 'Charlie', gender: 'Masculina' },
+  { id: 'TX3LPaxmHKxFdv7VOQHJ', label: 'Liam', gender: 'Masculina' },
+  { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel', gender: 'Masculina' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Sarah', gender: 'Feminina' },
+  { id: 'FGY2WhTYpPnrIDTdsKH5', label: 'Laura', gender: 'Feminina' },
+  { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice', gender: 'Feminina' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', label: 'Matilda', gender: 'Feminina' },
+  { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica', gender: 'Feminina' },
+]
 
 const SettingsPage: React.FC = () => {
   const { workspaceId } = useAuth()
@@ -35,6 +49,8 @@ const SettingsPage: React.FC = () => {
   const [botPersonality, setBotPersonality] = useState('')
   const [timezone, setTimezone] = useState('America/Sao_Paulo')
   const [language, setLanguage] = useState('pt-BR')
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const [ttsVoiceId, setTtsVoiceId] = useState('nPczCjzI2devNBz1zQrb')
   const [newCategory, setNewCategory] = useState('')
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
@@ -49,6 +65,8 @@ const SettingsPage: React.FC = () => {
       setBotPersonality(settings.bot_personality ?? '')
       setTimezone(settings.timezone ?? 'America/Sao_Paulo')
       setLanguage(settings.language ?? 'pt-BR')
+      setTtsEnabled(settings.tts_enabled ?? false)
+      setTtsVoiceId(settings.tts_voice_id ?? 'nPczCjzI2devNBz1zQrb')
     }
   }, [settings])
 
@@ -78,6 +96,8 @@ const SettingsPage: React.FC = () => {
           bot_personality: botPersonality.trim() || null,
           timezone,
           language,
+          tts_enabled: ttsEnabled,
+          tts_voice_id: ttsVoiceId,
         })
         .eq('workspace_id', workspaceId)
       if (error) throw error
@@ -151,6 +171,47 @@ const SettingsPage: React.FC = () => {
             </p>
             <span className="text-xs text-muted-foreground">{botPersonality.length}/500</span>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Respostas em Áudio (ElevenLabs TTS) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Volume2 className="w-4 h-4 text-primary" />
+            Respostas em Áudio (ElevenLabs)
+          </CardTitle>
+          <CardDescription>Quando ativado, o bot responde com áudio de voz quando você enviar uma mensagem de áudio</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Ativar respostas em áudio</p>
+              <p className="text-xs text-muted-foreground">O bot só responde com áudio quando recebe um áudio</p>
+            </div>
+            <Switch checked={ttsEnabled} onCheckedChange={setTtsEnabled} />
+          </div>
+          {ttsEnabled && (
+            <div className="space-y-2">
+              <Label>Voz do assistente</Label>
+              <Select value={ttsVoiceId} onValueChange={setTtsVoiceId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">🎙 Masculinas</div>
+                  {TTS_VOICES.filter(v => v.gender === 'Masculina').map(voice => (
+                    <SelectItem key={voice.id} value={voice.id}>{voice.label}</SelectItem>
+                  ))}
+                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground mt-1">🎙 Femininas</div>
+                  {TTS_VOICES.filter(v => v.gender === 'Feminina').map(voice => (
+                    <SelectItem key={voice.id} value={voice.id}>{voice.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Vozes do ElevenLabs — plano gratuito inclui 10.000 caracteres/mês</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

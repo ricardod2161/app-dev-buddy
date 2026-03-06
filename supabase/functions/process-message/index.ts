@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
     const [{ data: settings }, { data: contactRow }] = await Promise.all([
       supabase
         .from('workspace_settings')
-        .select('bot_response_format, language, timezone, bot_name, bot_personality, default_categories, default_tags')
+        .select('bot_response_format, language, timezone, bot_name, bot_personality, default_categories, default_tags, tts_enabled, tts_voice_id')
         .eq('workspace_id', workspace_id)
         .maybeSingle(),
       supabase
@@ -948,8 +948,10 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     // ── 11. Send reply to user ────────────────────────────────────────────────
     await sendReply({ supabase, provider, workspace_id, sender_phone, replyText })
 
-    // ── 12. TTS audio reply — only when user sent an audio message ─────────────
-    if (message_type === 'audio') {
+    // ── 12. TTS audio reply — only when user sent an audio message AND tts is enabled ──
+    const ttsEnabled = (settings as Record<string, unknown>)?.tts_enabled === true
+    const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'nPczCjzI2devNBz1zQrb'
+    if (message_type === 'audio' && ttsEnabled) {
       try {
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -959,7 +961,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({ text: replyText }),
+          body: JSON.stringify({ text: replyText, voice_id: ttsVoiceId }),
         })
         if (ttsRes.ok) {
           const { base64, content_type } = await ttsRes.json()

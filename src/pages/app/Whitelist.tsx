@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { Plus, Trash2, List, AlertCircle, RefreshCw, Loader2 } from 'lucide-react'
+import { Plus, Trash2, List, AlertCircle, RefreshCw, Loader2, Info } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -141,6 +141,23 @@ const WhitelistPage: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-slide-up">
+      {/* Info banner */}
+      <div className="flex gap-3 p-4 rounded-xl border border-border bg-muted/40">
+        <Info className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+        <div className="text-sm space-y-1">
+          <p className="font-medium text-foreground">Como funciona a whitelist</p>
+          <p className="text-muted-foreground">Adicione aqui os números autorizados a usar o assistente.</p>
+          <ul className="text-muted-foreground space-y-0.5 list-none">
+            <li>• <strong>Lista vazia:</strong> qualquer número pode interagir com o bot</li>
+            <li>• <strong>Com números na lista:</strong> apenas eles são atendidos</li>
+          </ul>
+          <p className="text-muted-foreground pt-1">
+            WhatsApp: <code className="bg-muted px-1 rounded text-xs">+5511999990000</code> ou <code className="bg-muted px-1 rounded text-xs">5511999990000</code>
+            {' · '}Telegram: <code className="bg-muted px-1 rounded text-xs">tg:123456789</code>
+          </p>
+        </div>
+      </div>
+
       {/* Toolbar */}
       <div className="flex justify-between items-center">
         <p className="text-sm text-muted-foreground">

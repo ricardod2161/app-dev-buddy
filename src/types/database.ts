@@ -166,6 +166,8 @@ export interface WorkspaceSettings {
   bot_personality: string | null
   timezone: string
   language: string
+  tts_enabled: boolean
+  tts_voice_id: string
   created_at: string
   updated_at: string
 }

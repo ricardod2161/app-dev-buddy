@@ -44,28 +44,39 @@ Deno.serve(async (req) => {
           if (res.ok) {
             await supabase.from('reminders').update({ status: 'sent' }).eq('id', reminder.id)
 
-            // 2. Send TTS audio notification (non-blocking)
+            // 2. Send TTS audio notification — only if tts_enabled in workspace settings
             try {
-              const ttsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/elevenlabs-tts`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`,
-                },
-                body: JSON.stringify({ text: reminderText }),
-              })
+              const { data: wsSettings } = await supabase
+                .from('workspace_settings')
+                .select('tts_enabled, tts_voice_id')
+                .eq('workspace_id', reminder.workspace_id)
+                .maybeSingle()
 
-              if (ttsRes.ok) {
-                const { base64, content_type } = await ttsRes.json()
-                await sendReminderAudio({
-                  supabase,
-                  workspace_id: reminder.workspace_id,
-                  phone: reminder.target_phone,
-                  base64,
-                  content_type,
+              const ttsEnabled = (wsSettings as Record<string, unknown> | null)?.tts_enabled === true
+              const ttsVoiceId = ((wsSettings as Record<string, unknown> | null)?.tts_voice_id as string) ?? 'nPczCjzI2devNBz1zQrb'
+
+              if (ttsEnabled) {
+                const ttsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/elevenlabs-tts`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`,
+                  },
+                  body: JSON.stringify({ text: reminderText, voice_id: ttsVoiceId }),
                 })
-              } else {
-                console.warn('TTS for reminder failed:', ttsRes.status)
+
+                if (ttsRes.ok) {
+                  const { base64, content_type } = await ttsRes.json()
+                  await sendReminderAudio({
+                    supabase,
+                    workspace_id: reminder.workspace_id,
+                    phone: reminder.target_phone,
+                    base64,
+                    content_type,
+                  })
+                } else {
+                  console.warn('TTS for reminder failed:', ttsRes.status)
+                }
               }
             } catch (ttsErr) {
               console.warn('TTS reminder audio failed (non-blocking):', ttsErr)
