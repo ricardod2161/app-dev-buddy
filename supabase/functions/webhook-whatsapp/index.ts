@@ -317,6 +317,52 @@ Deno.serve(async (req) => {
     // Update log
     await supabase.from('webhook_logs').update({ status: 'ok' }).eq('id', logId!)
 
+    // ── Fetch base64 from Evolution API for encrypted media (audio/image/document) ──
+    // WhatsApp media URLs are .enc (encrypted) and cannot be downloaded directly.
+    // Evolution API's getBase64FromMediaMessage downloads + decrypts them.
+    if (provider === 'EVOLUTION' && ['audio', 'image', 'document', 'video'].includes(messageType) && !mediaBase64 && integration.api_url && integration.api_key_encrypted && integration.instance_id) {
+      try {
+        console.log(`Fetching base64 for ${messageType} message ${providerMessageId} from Evolution API`)
+        const b64Res = await fetch(
+          `${integration.api_url}/chat/getBase64FromMediaMessage/${integration.instance_id}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': integration.api_key_encrypted,
+            },
+            body: JSON.stringify({
+              message: {
+                key: {
+                  id: providerMessageId,
+                  remoteJid: senderPhone + '@s.whatsapp.net',
+                  fromMe: false,
+                },
+              },
+              convertToMp4: false,
+            }),
+          }
+        )
+        if (b64Res.ok) {
+          const b64Data = await b64Res.json()
+          const fetchedBase64 = b64Data.base64 ?? b64Data.data ?? null
+          const fetchedMime = b64Data.mediaType ?? b64Data.mimetype ?? b64Data.mime ?? mediaMime
+          if (fetchedBase64) {
+            mediaBase64 = fetchedBase64
+            mediaMime = fetchedMime
+            console.log(`Base64 fetched successfully for ${messageType}: mime=${fetchedMime}, size=${fetchedBase64.length} chars`)
+          } else {
+            console.warn('Evolution getBase64 returned no base64 field:', JSON.stringify(b64Data).slice(0, 200))
+          }
+        } else {
+          const errText = await b64Res.text()
+          console.warn(`Evolution getBase64 failed (${b64Res.status}):`, errText.slice(0, 200))
+        }
+      } catch (e) {
+        console.error('Failed to fetch media base64 from Evolution:', e)
+      }
+    }
+
     // Fire-and-forget: AI processing
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     fetch(`${supabaseUrl}/functions/v1/process-message`, {
@@ -332,6 +378,7 @@ Deno.serve(async (req) => {
         media_url: mediaUrl,
         media_base64: mediaBase64,
         media_mime: mediaMime,
+        provider_message_id: providerMessageId,
       }),
     }).catch((e) => console.error('process-message fire-and-forget error:', e))
 

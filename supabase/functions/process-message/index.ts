@@ -224,32 +224,112 @@ Deno.serve(async (req) => {
 
     // ── 4. Transcribe audio ──────────────────────────────────────────────────
     if (message_type === 'audio' && mediaInlineData) {
+      console.log('Audio transcription starting:', {
+        hasBase64: !!mediaInlineData.data,
+        base64Length: mediaInlineData.data?.length ?? 0,
+        mimeType: mediaInlineData.mime_type,
+        mediaUrlPresent: !!media_url,
+      })
+
+      let transcribed = false
+
+      // Primary: OpenAI gpt-5-mini with input_audio format (Whisper-compatible)
+      // Format: { data: base64, format: 'mp3' | 'wav' }
+      // WhatsApp sends OGG/OPUS — we treat as mp3 which the API handles gracefully
       try {
+        const audioFormat = mediaInlineData.mime_type?.includes('wav') ? 'wav' : 'mp3'
         const transcribeRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'google/gemini-3-flash-preview',
+            model: 'openai/gpt-5-mini',
             messages: [{
               role: 'user',
               content: [
-                { type: 'text', text: 'Transcreva este áudio fielmente em português. Retorne APENAS a transcrição, sem comentários ou explicações.' },
-                { type: 'input_audio', input_audio: mediaInlineData },
+                {
+                  type: 'text',
+                  text: 'Transcreva fielmente este áudio em português brasileiro. Retorne APENAS a transcrição, sem nenhum comentário ou explicação adicional.',
+                },
+                {
+                  type: 'input_audio',
+                  input_audio: {
+                    data: mediaInlineData.data,
+                    format: audioFormat,
+                  },
+                },
               ],
             }],
           }),
         })
+
         if (transcribeRes.ok) {
           const transcribeData = await transcribeRes.json()
           const transcription = transcribeData.choices?.[0]?.message?.content?.trim()
-          if (transcription) {
+          if (transcription && transcription.length > 2) {
             effectiveText = `[Áudio transcrito]: ${transcription}`
-            console.log('Audio transcribed:', effectiveText)
+            transcribed = true
+            console.log('Audio transcribed (primary openai/gpt-5-mini):', transcription.slice(0, 100))
+          } else {
+            console.warn('Primary transcription returned empty/short result:', transcribeData)
           }
+        } else {
+          const errBody = await transcribeRes.text()
+          console.warn(`Primary transcription HTTP ${transcribeRes.status}:`, errBody.slice(0, 300))
         }
       } catch (e) {
-        console.error('Audio transcription failed:', e)
-        effectiveText = '[Áudio recebido - transcrição indisponível]'
+        console.error('Primary audio transcription exception:', e)
+      }
+
+      // Fallback: Gemini multimodal with inline_data format
+      if (!transcribed) {
+        console.log('Trying fallback transcription with gemini-2.5-flash (inline_data format)...')
+        try {
+          const fallbackRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'google/gemini-2.5-flash',
+              messages: [{
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Transcreva fielmente este áudio em português brasileiro. Retorne APENAS a transcrição.',
+                  },
+                  {
+                    // Gemini uses inline_data format for multimodal
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:${mediaInlineData.mime_type};base64,${mediaInlineData.data}`,
+                    },
+                  },
+                ],
+              }],
+            }),
+          })
+
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json()
+            const fallbackTranscription = fallbackData.choices?.[0]?.message?.content?.trim()
+            if (fallbackTranscription && fallbackTranscription.length > 2) {
+              effectiveText = `[Áudio transcrito]: ${fallbackTranscription}`
+              transcribed = true
+              console.log('Audio transcribed (fallback gemini-2.5-flash):', fallbackTranscription.slice(0, 100))
+            } else {
+              console.warn('Fallback transcription also returned empty result')
+            }
+          } else {
+            const errText = await fallbackRes.text()
+            console.warn(`Fallback transcription HTTP ${fallbackRes.status}:`, errText.slice(0, 300))
+          }
+        } catch (e) {
+          console.error('Fallback audio transcription exception:', e)
+        }
+      }
+
+      if (!transcribed) {
+        console.error('All transcription attempts failed — using friendly fallback')
+        effectiveText = '[Áudio recebido mas não foi possível transcrever automaticamente. Por favor, reenvie o áudio ou escreva a mensagem em texto.]'
       }
     }
 
@@ -259,7 +339,7 @@ Deno.serve(async (req) => {
         image: '[Imagem recebida - analise e sugira a ação mais útil]',
         document: '[Documento recebido]',
         video: '[Vídeo recebido]',
-        audio: '[Áudio recebido]',
+        audio: '[Áudio recebido - não foi possível transcrever. Peça ao usuário para reenviar ou escrever em texto]',
       }
       effectiveText = typeLabels[message_type] ?? '[Mídia recebida]'
     }
