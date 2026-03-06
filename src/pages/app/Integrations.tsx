@@ -195,8 +195,91 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
   const isEvolutionOrCloud = provider === 'EVOLUTION' || provider === 'CLOUD'
   const isConfigured = !!integration
 
+  const setupSteps = {
+    EVOLUTION: {
+      title: 'WhatsApp via Evolution API',
+      webhookUrl: webhookWhatsappUrl,
+      webhookLabel: 'URL do Webhook (cole no painel da Evolution)',
+      events: 'messages.upsert',
+      steps: [
+        'Tenha uma instância da Evolution API rodando (self-hosted ou cloud)',
+        'Preencha a URL da API — ex: https://sua-evolution.com',
+        'Preencha a API Key da sua instância Evolution',
+        'Preencha o Instance ID (nome exato da instância)',
+        'Preencha o Número no formato internacional: +5511999990000',
+        'Defina um Webhook Secret (qualquer string segura)',
+        <>No painel da Evolution, vá em <strong>Instâncias → [sua instância] → Webhook</strong></>,
+        <>Cole a URL abaixo no campo Webhook URL e ative o evento <code className="bg-muted px-1 rounded text-xs">messages.upsert</code></>,
+        'Ative a integração aqui e clique em Salvar',
+        'Use "Testar Conexão" para verificar e "Simular Webhook" para testar o fluxo completo',
+      ],
+    },
+    CLOUD: {
+      title: 'WhatsApp via Meta Cloud API',
+      webhookUrl: webhookWhatsappUrl,
+      webhookLabel: 'URL do Webhook (cole no Meta for Developers)',
+      events: 'messages',
+      steps: [
+        'Acesse Meta for Developers e crie um app do tipo Business',
+        'Adicione o produto "WhatsApp" ao app',
+        'Em "Configuração" → "Webhooks", adicione a URL abaixo',
+        'Configure o Verify Token igual ao Webhook Secret definido aqui',
+        'Assine o campo messages nas configurações do webhook',
+        'Copie o Phone Number ID e o Access Token permanente',
+        'Cole o Phone Number ID no campo "Instance ID" e o Access Token na "API Key"',
+        'Ative a integração e clique em Salvar',
+      ],
+    },
+    TELEGRAM: {
+      title: 'Telegram Bot',
+      webhookUrl: webhookTelegramUrl,
+      webhookLabel: 'URL do Webhook (configurada automaticamente)',
+      events: 'message',
+      steps: [
+        'Abra o @BotFather no Telegram e envie /newbot',
+        'Siga as instruções e copie o token gerado',
+        'Cole o token no campo Bot Token abaixo',
+        'Opcionalmente, defina um Webhook Secret para segurança',
+        'Clique em Salvar',
+        'Clique em "Configurar Webhook Automaticamente" — o sistema registra a URL no Telegram',
+        'Envie /start ao bot para iniciar uma conversa e obter o Chat ID',
+        'Adicione o número na Whitelist no formato tg:CHAT_ID',
+      ],
+    },
+  }
+
+  const currentSetup = setupSteps[provider]
+
   return (
     <div className="space-y-6">
+      {/* Setup Guide Banner */}
+      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-primary shrink-0" />
+            <span className="text-sm font-semibold text-foreground">Guia de Configuração</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setSetupOpen(true)} className="shrink-0 gap-1.5 text-xs h-7">
+            <ExternalLink className="w-3 h-3" />
+            Ver instruções completas
+          </Button>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-1.5">{currentSetup.webhookLabel}:</p>
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+            <code className="text-xs font-mono flex-1 break-all text-foreground">{currentSetup.webhookUrl}</code>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(currentSetup.webhookUrl)}>
+              <Copy className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+          {provider !== 'TELEGRAM' && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Evento necessário: <code className="bg-muted px-1 rounded">{currentSetup.events}</code>
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Status row */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
@@ -209,7 +292,7 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status:</span>
           {isActive
-            ? <Badge className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"><CheckCircle className="w-3 h-3 mr-1" />Ativo</Badge>
+            ? <Badge className="bg-green-500/10 text-green-600 border-green-500/20"><CheckCircle className="w-3 h-3 mr-1" />Ativo</Badge>
             : <Badge variant="outline" className="text-muted-foreground"><XCircle className="w-3 h-3 mr-1" />Inativo</Badge>
           }
           <Button variant="outline" size="sm" onClick={() => setIsActive(v => !v)}>
@@ -227,6 +310,44 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
           <span>Preencha os campos abaixo e clique em <strong className="text-foreground">Salvar</strong> para criar a integração.</span>
         </div>
       )}
+
+      {/* Setup Instructions Modal */}
+      <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4" />
+              Como configurar — {currentSetup.title}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{currentSetup.webhookLabel}</p>
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
+                <code className="text-xs font-mono flex-1 break-all text-foreground">{currentSetup.webhookUrl}</code>
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(currentSetup.webhookUrl)}>
+                  <Copy className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+            <Separator />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Passo a passo</p>
+              <ol className="space-y-2">
+                {currentSetup.steps.map((step, i) => (
+                  <li key={i} className="flex gap-3 text-sm">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-semibold mt-0.5">{i + 1}</span>
+                    <span className="text-muted-foreground leading-relaxed">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setSetupOpen(false)}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {isEvolutionOrCloud && (
         <div className="space-y-4">
