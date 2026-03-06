@@ -715,6 +715,21 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
               },
             },
           },
+          {
+            type: 'function',
+            function: {
+              name: 'weekly_summary',
+              description: 'Gera um resumo completo da semana: tarefas concluídas, novas notas, gastos totais e lembretes disparados. Use quando o usuário pedir "resumo da semana", "o que fiz essa semana", "resumo semanal".',
+              parameters: {
+                type: 'object',
+                properties: {
+                  reply_message: { type: 'string', description: 'Introdução amigável antes do resumo (ex: "Aqui está seu resumo da semana 📊")' },
+                },
+                required: ['reply_message'],
+                additionalProperties: false,
+              },
+            },
+          },
         ],
         tool_choice: 'required',
       }),
@@ -723,15 +738,43 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     if (!aiResponse.ok) {
       const errText = await aiResponse.text()
       console.error('AI gateway error:', aiResponse.status, errText)
+      // If rate limited or payment required, send friendly message
+      if (aiResponse.status === 429) {
+        const fallback = '⚠️ Estou sobrecarregada no momento. Tente novamente em alguns segundos!'
+        await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
+        await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
+        return new Response(JSON.stringify({ ok: false, error: 'rate_limited' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      if (aiResponse.status === 402) {
+        const fallback = '⚠️ Créditos de IA esgotados. Por favor, verifique as configurações do workspace.'
+        await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
+        await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
+        return new Response(JSON.stringify({ ok: false, error: 'payment_required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
       throw new Error(`AI error ${aiResponse.status}: ${errText}`)
     }
 
     const aiData = await aiResponse.json()
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0]
-    if (!toolCall) throw new Error('No tool call returned by AI')
 
-    const fnName = toolCall.function.name
-    const fnArgs = JSON.parse(toolCall.function.arguments)
+    // Robust fallback: if no tool_call, extract text content and use just_reply
+    let fnName: string
+    let fnArgs: Record<string, unknown>
+    if (!toolCall) {
+      const rawContent = aiData.choices?.[0]?.message?.content
+      console.warn('No tool call returned by AI — falling back to content reply:', JSON.stringify(aiData).slice(0, 400))
+      fnName = 'just_reply'
+      fnArgs = { message: rawContent ?? 'Olá! Como posso ajudar? 😊' }
+    } else {
+      fnName = toolCall.function.name
+      try {
+        fnArgs = JSON.parse(toolCall.function.arguments)
+      } catch (parseErr) {
+        console.error('Failed to parse tool arguments JSON:', toolCall.function.arguments, parseErr)
+        fnName = 'just_reply'
+        fnArgs = { message: 'Desculpe, ocorreu um erro ao processar sua mensagem. Pode repetir?' }
+      }
+    }
 
     let replyText = ''
 
