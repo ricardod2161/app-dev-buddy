@@ -42,7 +42,13 @@ function formatCurrency(value: number): string {
 }
 
 function hasFinancialContent(text: string): boolean {
-  return /R\$|reais|real|\d+\s*(reais|real)/i.test(text)
+  return /R\$|reais|real|\d+\s*(reais|real)|gastei|comprei|paguei|custou|vale\s+\d|valeu\s+\d|gasto\s+de|compra\s+de|me\s+cobrou|quanto\s+fica/i.test(text)
+}
+
+function normalizeFinancialCategory(cat: string | null): boolean {
+  if (!cat) return false
+  const lower = cat.toLowerCase()
+  return lower.includes('financ') || lower.includes('gasto') || lower.includes('compra') || lower === 'despesa' || lower.includes('despesa')
 }
 
 Deno.serve(async (req) => {
@@ -223,7 +229,7 @@ Deno.serve(async (req) => {
           method: 'POST',
           headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
+            model: 'google/gemini-3-flash-preview',
             messages: [{
               role: 'user',
               content: [
@@ -316,11 +322,21 @@ ${tasksContext}
 **Próximos lembretes (${upcomingReminders?.length ?? 0}):**
 ${remindersContext}${financialContext}
 
-## Tipo de Mensagem
-${message_type === 'audio' ? '🎤 Áudio transcrito — trate como texto normal' : ''}
+## Tratamento de Áudio 🎤
+${message_type === 'audio' ? `A mensagem atual é um ÁUDIO transcrito. Siga obrigatoriamente estas regras:
+- Se o áudio for um COMANDO direto (ex: "anota que...", "cria tarefa de...", "me lembra...", "gastei...") → execute o comando correspondente
+- Se o áudio for CONTEÚDO para salvar (reflexão, ideia, relato, plano, pensamento falado) → use save_transcript para salvar e confirmar com resumo
+- Se o áudio for uma PERGUNTA ou conversa casual → responda normalmente com just_reply
+- ⛔ NUNCA use just_reply para áudios com conteúdo substancial (>3 frases) sem oferecer uma ação
+- Para áudios longos: crie título descritivo e salve o conteúdo completo` : ''}
 ${message_type === 'image' ? '📷 Imagem — descreva o que vê e sugira ação útil (criar nota, tarefa, etc.)' : ''}
-${message_type === 'document' ? '📄 Documento — resuma o conteúdo se possível' : ''}
-${message_type === 'text' ? '💬 Texto' : ''}
+${message_type === 'document' ? '📄 Documento — resuma o conteúdo se possível e ofereça salvá-lo como nota' : ''}
+${message_type === 'text' ? '💬 Mensagem de texto' : ''}
+
+## Inteligência Financeira — Palavras-Chave 💰
+Palavras que SEMPRE indicam gasto financeiro e exigem create_note com category="Financeiro":
+"gastei", "comprei", "paguei", "custou", "vale", "valeu", "custa", "quanto fica", "me cobrou", "R$", "reais", "dinheiro", "gasto de", "compra de"
+Exemplos: "gastei 15 reais de lanche" → create_note category=Financeiro | "comprei uma rapadura 3 reais" → create_note category=Financeiro
 
 ## Regras de Ouro
 1. ${formatInstruction}
@@ -331,6 +347,7 @@ ${message_type === 'text' ? '💬 Texto' : ''}
 6. Para lembretes: extraia data/hora precisa e use ISO 8601 no campo remind_at (use ${new Date().getFullYear()} como ano base)
 7. Se ambíguo, pergunte de forma gentil e direta
 8. Use negrito (*texto*) para destacar itens importantes
+9. ⛔ NUNCA ignore áudio com conteúdo — sempre ofereça salvar ou registrar
 ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
     // ── 7. Build conversation history ─────────────────────────────────────────
@@ -370,7 +387,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       method: 'POST',
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'google/gemini-3-flash-preview',
         messages: aiMessages,
         tools: [
           {
@@ -546,13 +563,48 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             type: 'function',
             function: {
               name: 'just_reply',
-              description: 'Responde ao usuário sem nenhuma ação de criação/edição. Use para conversas, perguntas gerais, ou quando nenhuma outra ferramenta se aplica.',
+              description: 'Responde ao usuário sem nenhuma ação de criação/edição. Use APENAS para: (1) perguntas e conversas casuais, (2) áudios que são exclusivamente perguntas, (3) situações onde nenhuma outra ferramenta se aplica. ⛔ NÃO use para áudios com conteúdo substancial.',
               parameters: {
                 type: 'object',
                 properties: {
                   message: { type: 'string', description: 'Resposta para o usuário' },
                 },
                 required: ['message'],
+                additionalProperties: false,
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'save_transcript',
+              description: 'Salva a transcrição/conteúdo de um áudio como nota estruturada. Use quando o áudio contém conteúdo substancial (reflexão, ideia, relato, plano) que NÃO é um comando direto. Preferir este tool em vez de just_reply para áudios com mais de 3 frases.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', description: 'Título descritivo e conciso resumindo o tema do áudio' },
+                  transcript: { type: 'string', description: 'Transcrição completa ou conteúdo fiel do áudio' },
+                  summary: { type: 'string', description: 'Resumo de 2-3 frases destacando os pontos principais' },
+                  category: { type: 'string', description: 'Categoria mais adequada: Pessoal, Ideia, Trabalho, Reunião, etc.' },
+                  reply_message: { type: 'string', description: 'Confirmação amigável com resumo do que foi salvo, perguntando se quer criar tarefas/lembretes relacionados' },
+                },
+                required: ['title', 'transcript', 'summary', 'reply_message'],
+                additionalProperties: false,
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'delete_note',
+              description: 'Remove/deleta uma nota existente pelo título. Use quando usuário pede para apagar, deletar ou remover uma nota.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  note_title: { type: 'string', description: 'Título ou parte do título da nota a ser removida' },
+                  reply_message: { type: 'string', description: 'Confirmação amigável após deletar' },
+                },
+                required: ['note_title', 'reply_message'],
                 additionalProperties: false,
               },
             },
@@ -579,8 +631,8 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
     // ── 9. Execute chosen action ──────────────────────────────────────────────
     if (fnName === 'create_note') {
-      // Auto-detect financial content
-      const isFinancial = fnArgs.category === 'Financeiro' || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
+      // Auto-detect financial content — use normalizeFinancialCategory + keyword scan
+      const isFinancial = normalizeFinancialCategory(fnArgs.category) || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
       const finalCategory = isFinancial ? 'Financeiro' : (fnArgs.category ?? 'Geral')
 
       const { error: noteErr } = await supabase.from('notes').insert({
@@ -683,31 +735,20 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         dateFrom = new Date(now); dateFrom.setDate(1); dateFrom.setHours(0, 0, 0, 0)
       }
 
-      // Dual-query strategy: tagged Financeiro + any note with monetary content
-      const [{ data: taggedNotes }, { data: untaggedNotes }] = await Promise.all([
-        supabase
-          .from('notes')
-          .select('id, title, content, created_at')
-          .eq('workspace_id', workspace_id)
-          .eq('category', 'Financeiro')
-          .gte('created_at', dateFrom.toISOString())
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('notes')
-          .select('id, title, content, created_at')
-          .eq('workspace_id', workspace_id)
-          .neq('category', 'Financeiro')
-          .gte('created_at', dateFrom.toISOString())
-          .or('title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%,title.ilike.% real%,content.ilike.% real%')
-          .order('created_at', { ascending: false }),
-      ])
+      // Broad single-query strategy: fetch ALL notes in period, filter in-code
+      const { data: allPeriodNotes } = await supabase
+        .from('notes')
+        .select('id, title, content, category, created_at')
+        .eq('workspace_id', workspace_id)
+        .gte('created_at', dateFrom.toISOString())
+        .order('created_at', { ascending: false })
 
-      // Merge, deduplicate by id
-      const seenIds = new Set<string>()
-      const allFinancialNotes: typeof taggedNotes = []
-      for (const n of [...(taggedNotes ?? []), ...(untaggedNotes ?? [])]) {
-        if (!seenIds.has(n.id)) { seenIds.add(n.id); allFinancialNotes.push(n) }
-      }
+      // Filter for financial notes using both category normalization and keyword scan
+      const allFinancialNotes = (allPeriodNotes ?? []).filter(n => {
+        const isFinancialCat = normalizeFinancialCategory(n.category)
+        const text = `${n.title ?? ''} ${n.content ?? ''}`
+        return isFinancialCat || hasFinancialContent(text)
+      })
 
       if (!allFinancialNotes.length) {
         const periodLabel = fnArgs.period === 'hoje' ? 'hoje' : fnArgs.period === 'semana' ? 'nos últimos 7 dias' : 'este mês'
@@ -806,6 +847,31 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         replyText = fnArgs.reply_message ?? `✅ Lembrete "${r.title}" cancelado.`
       } else {
         replyText = `❌ Não encontrei nenhum lembrete com o nome "${fnArgs.reminder_title}".`
+      }
+    } else if (fnName === 'save_transcript') {
+      const { error: transcriptErr } = await supabase.from('notes').insert({
+        workspace_id,
+        title: fnArgs.title,
+        content: `${fnArgs.summary}\n\n---\n\n${fnArgs.transcript}`,
+        category: fnArgs.category ?? 'Pessoal',
+        tags: ['áudio', 'transcrição'],
+        source_message_id: null,
+      })
+      if (transcriptErr) console.error('Failed to save transcript:', transcriptErr)
+      replyText = fnArgs.reply_message ?? `✅ Áudio salvo como nota: "${fnArgs.title}"`
+    } else if (fnName === 'delete_note') {
+      const { data: matchingNotes } = await supabase
+        .from('notes')
+        .select('id, title')
+        .eq('workspace_id', workspace_id)
+        .ilike('title', `%${fnArgs.note_title}%`)
+        .limit(1)
+      if (matchingNotes?.length) {
+        const { error: delErr } = await supabase.from('notes').delete().eq('id', matchingNotes[0].id)
+        if (delErr) console.error('Failed to delete note:', delErr)
+        replyText = fnArgs.reply_message ?? `🗑️ Nota "${matchingNotes[0].title}" removida.`
+      } else {
+        replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}".`
       }
     } else {
       // just_reply
