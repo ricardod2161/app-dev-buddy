@@ -33,10 +33,11 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
   const [webhookLoading, setWebhookLoading] = useState(false)
   const [simulateOpen, setSimulateOpen] = useState(false)
   const [simulateLoading, setSimulateLoading] = useState(false)
+  const effectiveInstance = integration?.instance_id ?? 'secretaria'
   const [simulatePayload, setSimulatePayload] = useState(
     provider === 'TELEGRAM'
       ? JSON.stringify({ update_id: 123456789, message: { message_id: 1, from: { id: 111111111, first_name: 'Teste', username: 'testuser' }, chat: { id: 111111111, type: 'private' }, text: 'anota: Teste de webhook simulado' } }, null, 2)
-      : JSON.stringify({ event: 'messages.upsert', data: { key: { remoteJid: '5511999990001@s.whatsapp.net', fromMe: false, id: 'FAKE123' }, message: { conversation: 'anota: Teste de webhook simulado' } } }, null, 2)
+      : JSON.stringify({ event: 'messages.upsert', instance: integration?.instance_id ?? 'secretaria', data: { instance: integration?.instance_id ?? 'secretaria', key: { remoteJid: '5511999990001@s.whatsapp.net', fromMe: false, id: 'FAKE123' }, message: { conversation: 'anota: Teste de webhook simulado' } } }, null, 2)
   )
 
   const [apiUrl, setApiUrl] = useState(integration?.api_url ?? '')
@@ -473,10 +474,10 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
         <Button variant="outline" onClick={() => setSimulateOpen(true)}>
           <Send className="w-4 h-4 mr-2" />Simular Webhook
         </Button>
-        {provider === 'TELEGRAM' && (
+        {(provider === 'TELEGRAM' || provider === 'EVOLUTION') && (
           <Button variant="outline" onClick={autoConfigureWebhook} disabled={webhookLoading}>
             {webhookLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ExternalLink className="w-4 h-4 mr-2" />}
-            Configurar Webhook Automaticamente
+            {provider === 'EVOLUTION' ? 'Configurar Webhook na Evolution' : 'Configurar Webhook Automaticamente'}
           </Button>
         )}
       </div>
