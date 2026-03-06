@@ -157,6 +157,23 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Nome do assistente */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Nome do Assistente</CardTitle>
+          <CardDescription>Como o bot se identificará nas conversas do WhatsApp/Telegram</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={botName}
+            onChange={e => setBotName(e.target.value)}
+            placeholder="Ex: Assistente IA, Copiloto, Max..."
+            maxLength={50}
+          />
+          <p className="text-xs text-muted-foreground mt-2">Este nome é usado no prompt do assistente e aparecerá nas respostas.</p>
+        </CardContent>
+      </Card>
+
       {/* Formato do bot */}
       <Card>
         <CardHeader>
