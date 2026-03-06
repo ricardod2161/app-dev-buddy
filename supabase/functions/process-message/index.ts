@@ -42,7 +42,13 @@ function formatCurrency(value: number): string {
 }
 
 function hasFinancialContent(text: string): boolean {
-  return /R\$|reais|real|\d+\s*(reais|real)/i.test(text)
+  return /R\$|reais|real|\d+\s*(reais|real)|gastei|comprei|paguei|custou|vale\s+\d|valeu\s+\d|gasto\s+de|compra\s+de|me\s+cobrou|quanto\s+fica/i.test(text)
+}
+
+function normalizeFinancialCategory(cat: string | null): boolean {
+  if (!cat) return false
+  const lower = cat.toLowerCase()
+  return lower.includes('financ') || lower.includes('gasto') || lower.includes('compra') || lower === 'despesa' || lower.includes('despesa')
 }
 
 Deno.serve(async (req) => {
@@ -223,7 +229,7 @@ Deno.serve(async (req) => {
           method: 'POST',
           headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
+            model: 'google/gemini-3-flash-preview',
             messages: [{
               role: 'user',
               content: [
