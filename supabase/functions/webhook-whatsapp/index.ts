@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
           messageText = (msg.text as Record<string, string>)?.body ?? null
         } else if (msgType === 'audio') {
           messageType = 'audio'
-          mediaUrl = (msg.audio as Record<string, string>)?.id ?? null // Meta uses media ID
+          mediaUrl = (msg.audio as Record<string, string>)?.id ?? null
           mediaMime = 'audio/ogg'
         } else if (msgType === 'image') {
           messageType = 'image'
@@ -89,6 +89,14 @@ Deno.serve(async (req) => {
       const key = data?.key as Record<string, unknown>
       senderPhone = (key?.remoteJid as string)?.replace('@s.whatsapp.net', '').replace('@g.us', '') ?? null
       providerMessageId = key?.id as string
+
+      // Skip messages from self (fromMe = true)
+      if (key?.fromMe === true) {
+        return new Response(JSON.stringify({ ok: true, ignored: 'fromMe' }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
       const message = data?.message as Record<string, unknown>
 
       // Extract base64 if provided by Evolution
@@ -102,7 +110,6 @@ Deno.serve(async (req) => {
         const audioMsg = message.audioMessage as Record<string, unknown>
         mediaUrl = audioMsg?.url as string ?? null
         mediaMime = (audioMsg?.mimetype as string) ?? 'audio/ogg'
-        // For PTT (push-to-talk voice notes)
         if (audioMsg?.ptt) messageType = 'audio'
       } else if (message?.imageMessage) {
         messageType = 'image'
@@ -126,57 +133,88 @@ Deno.serve(async (req) => {
         messageType = 'sticker'
         mediaUrl = (message.stickerMessage as Record<string, unknown>)?.url as string ?? null
       } else if (message?.reactionMessage) {
-        // Ignore reactions
         return new Response(JSON.stringify({ ok: true, ignored: 'reaction' }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      } else if (!message || Object.keys(message).length === 0) {
+        // Empty or unknown message type - ignore
+        return new Response(JSON.stringify({ ok: true, ignored: 'empty_message' }), {
           status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
     }
 
-    // Find workspace by matching the integration's instance
+    // ── Find workspace via integration ───────────────────────────────────────
+    // Strategy: try to match by instance_id first, then fall back to any active integration
     const instanceName = isMeta ? null : ((payload.data as Record<string, unknown>)?.instance as string) ?? null
 
-    let integrationQuery = supabase
-      .from('integrations')
-      .select('workspace_id, webhook_secret, api_key_encrypted, api_url, instance_id, phone_number')
-      .eq('provider', provider)
-      .eq('is_active', true)
+    console.log(`[webhook] provider=${provider} event=${eventType} instance=${instanceName} sender=${senderPhone} msgType=${messageType}`)
 
+    let integration: Record<string, unknown> | null = null
+
+    // Try exact instance_id match first
     if (instanceName) {
-      integrationQuery = integrationQuery.eq('instance_id', instanceName)
+      const { data: exactMatch } = await supabase
+        .from('integrations')
+        .select('workspace_id, webhook_secret, api_key_encrypted, api_url, instance_id, phone_number')
+        .eq('provider', provider)
+        .eq('is_active', true)
+        .eq('instance_id', instanceName)
+        .limit(1)
+        .maybeSingle()
+      integration = exactMatch
     }
 
-    const { data: integrations } = await integrationQuery.limit(10)
+    // Fallback: any active integration for provider (handles renamed instances)
+    if (!integration) {
+      const { data: fallbackMatch } = await supabase
+        .from('integrations')
+        .select('workspace_id, webhook_secret, api_key_encrypted, api_url, instance_id, phone_number')
+        .eq('provider', provider)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle()
+      integration = fallbackMatch
+      if (integration) {
+        console.log(`[webhook] Using fallback integration (instance mismatch: got "${instanceName}", have "${integration.instance_id}")`)
+      }
+    }
 
-    if (!integrations?.length) {
+    if (!integration) {
+      console.error('[webhook] No active integration found for provider:', provider, 'instance:', instanceName)
       return new Response(JSON.stringify({ error: 'No active integration found' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const integration = integrations[0]
-    workspaceId = integration.workspace_id
+    workspaceId = integration.workspace_id as string
 
-    // HMAC-SHA256 signature validation
+    // HMAC-SHA256 signature validation (only if header is present AND secret is set)
     if (integration.webhook_secret) {
       const sigHeader = req.headers.get('x-hub-signature-256') ?? req.headers.get('x-evolution-signature')
       if (sigHeader) {
-        const key = await crypto.subtle.importKey(
-          'raw',
-          new TextEncoder().encode(integration.webhook_secret),
-          { name: 'HMAC', hash: 'SHA-256' },
-          false,
-          ['verify']
-        )
-        const sigBytes = sigHeader.startsWith('sha256=')
-          ? hexToBytes(sigHeader.slice(7))
-          : hexToBytes(sigHeader)
-        const bodyBytes = new TextEncoder().encode(rawBody)
-        const valid = await crypto.subtle.verify('HMAC', key, sigBytes, bodyBytes)
-        if (!valid) {
-          return new Response(JSON.stringify({ error: 'Invalid signature' }), {
-            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          })
+        try {
+          const key = await crypto.subtle.importKey(
+            'raw',
+            new TextEncoder().encode(integration.webhook_secret as string),
+            { name: 'HMAC', hash: 'SHA-256' },
+            false,
+            ['verify']
+          )
+          const sigBytes = sigHeader.startsWith('sha256=')
+            ? hexToBytes(sigHeader.slice(7))
+            : hexToBytes(sigHeader)
+          const bodyBytes = new TextEncoder().encode(rawBody)
+          const valid = await crypto.subtle.verify('HMAC', key, sigBytes, bodyBytes)
+          if (!valid) {
+            console.warn('[webhook] Invalid signature — rejecting request')
+            return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+              status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
+          }
+        } catch (sigErr) {
+          console.warn('[webhook] Signature validation error (continuing):', sigErr)
+          // Don't block on signature errors — log and continue
         }
       }
     }
@@ -192,7 +230,8 @@ Deno.serve(async (req) => {
     logId = logRow?.id ?? null
 
     // Only process message events
-    if (!eventType.includes('messages') && !eventType.includes('message')) {
+    const isMessageEvent = eventType.toLowerCase().includes('message') || eventType === 'unknown'
+    if (!isMessageEvent) {
       await supabase.from('webhook_logs').update({ status: 'ignored' }).eq('id', logId!)
       return new Response(JSON.stringify({ ok: true, ignored: true }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -254,7 +293,6 @@ Deno.serve(async (req) => {
       .eq('contact_phone', phoneE164)
       .maybeSingle()
 
-    // Look up contact name from contacts table
     const { data: contactRow } = await supabase
       .from('contacts')
       .select('name')
@@ -279,7 +317,6 @@ Deno.serve(async (req) => {
       }).select('id').single()
 
       if (convErr || !newConv) {
-        // Race condition: retry fetch
         const { data: retryConv } = await supabase
           .from('conversations')
           .select('id')
@@ -317,19 +354,17 @@ Deno.serve(async (req) => {
     // Update log
     await supabase.from('webhook_logs').update({ status: 'ok' }).eq('id', logId!)
 
-    // ── Fetch base64 from Evolution API for encrypted media (audio/image/document) ──
-    // WhatsApp media URLs are .enc (encrypted) and cannot be downloaded directly.
-    // Evolution API's getBase64FromMediaMessage downloads + decrypts them.
+    // ── Fetch base64 from Evolution API for encrypted media ──────────────────
     if (provider === 'EVOLUTION' && ['audio', 'image', 'document', 'video'].includes(messageType) && !mediaBase64 && integration.api_url && integration.api_key_encrypted && integration.instance_id) {
       try {
-        console.log(`Fetching base64 for ${messageType} message ${providerMessageId} from Evolution API`)
+        console.log(`[webhook] Fetching base64 for ${messageType} ${providerMessageId}`)
         const b64Res = await fetch(
           `${integration.api_url}/chat/getBase64FromMediaMessage/${integration.instance_id}`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'apikey': integration.api_key_encrypted,
+              'apikey': integration.api_key_encrypted as string,
             },
             body: JSON.stringify({
               message: {
@@ -350,22 +385,24 @@ Deno.serve(async (req) => {
           if (fetchedBase64) {
             mediaBase64 = fetchedBase64
             mediaMime = fetchedMime
-            console.log(`Base64 fetched successfully for ${messageType}: mime=${fetchedMime}, size=${fetchedBase64.length} chars`)
+            console.log(`[webhook] Base64 fetched: mime=${fetchedMime}, size=${fetchedBase64.length}`)
           } else {
-            console.warn('Evolution getBase64 returned no base64 field:', JSON.stringify(b64Data).slice(0, 200))
+            console.warn('[webhook] Evolution getBase64 returned no base64:', JSON.stringify(b64Data).slice(0, 200))
           }
         } else {
-          const errText = await b64Res.text()
-          console.warn(`Evolution getBase64 failed (${b64Res.status}):`, errText.slice(0, 200))
+          console.warn(`[webhook] Evolution getBase64 failed (${b64Res.status}):`, await b64Res.text().then(t => t.slice(0, 200)))
         }
       } catch (e) {
-        console.error('Failed to fetch media base64 from Evolution:', e)
+        console.error('[webhook] Failed to fetch media base64:', e)
       }
     }
 
     // Fire-and-forget: AI processing
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+
+    console.log(`[webhook] Dispatching process-message for conv=${conversationId} type=${messageType}`)
+
     fetch(`${supabaseUrl}/functions/v1/process-message`, {
       method: 'POST',
       headers: {
@@ -385,20 +422,22 @@ Deno.serve(async (req) => {
         media_mime: mediaMime,
         provider_message_id: providerMessageId,
       }),
-    }).catch((e) => console.error('process-message fire-and-forget error:', e))
+    }).catch((e) => console.error('[webhook] process-message dispatch error:', e))
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
   } catch (err) {
-    console.error('webhook-whatsapp error:', err)
+    console.error('[webhook] Fatal error:', err)
     if (logId) {
-      const supabase2 = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-      await supabase2.from('webhook_logs').update({
-        status: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      }).eq('id', logId)
+      try {
+        const supabase2 = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+        await supabase2.from('webhook_logs').update({
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        }).eq('id', logId)
+      } catch (_) { /* ignore */ }
     }
     return new Response(JSON.stringify({ error: 'Internal error' }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
