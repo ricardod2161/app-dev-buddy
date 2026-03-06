@@ -176,6 +176,50 @@ const SettingsPage: React.FC = () => {
 
       {/* Formato do bot */}
       <Card>
+
+      {/* Respostas em Áudio (ElevenLabs TTS) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Volume2 className="w-4 h-4 text-primary" />
+            Respostas em Áudio (ElevenLabs)
+          </CardTitle>
+          <CardDescription>Quando ativado, o bot responde com áudio de voz quando você enviar uma mensagem de áudio</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Ativar respostas em áudio</p>
+              <p className="text-xs text-muted-foreground">O bot só responde com áudio quando recebe um áudio</p>
+            </div>
+            <Switch checked={ttsEnabled} onCheckedChange={setTtsEnabled} />
+          </div>
+          {ttsEnabled && (
+            <div className="space-y-2">
+              <Label>Voz do assistente</Label>
+              <Select value={ttsVoiceId} onValueChange={setTtsVoiceId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">🎙 Masculinas</div>
+                  {TTS_VOICES.filter(v => v.gender === 'Masculina').map(voice => (
+                    <SelectItem key={voice.id} value={voice.id}>{voice.label}</SelectItem>
+                  ))}
+                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground mt-1">🎙 Femininas</div>
+                  {TTS_VOICES.filter(v => v.gender === 'Feminina').map(voice => (
+                    <SelectItem key={voice.id} value={voice.id}>{voice.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Vozes do ElevenLabs — plano gratuito inclui 10.000 caracteres/mês</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Formato do bot */}
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Formato de Resposta do Bot</CardTitle>
           <CardDescription>Define o nível de detalhe das respostas automáticas</CardDescription>
