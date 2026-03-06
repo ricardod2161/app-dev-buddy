@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { X, Plus, Save, Loader2, Search } from 'lucide-react'
+import { X, Plus, Save, Loader2, Search, Bot, Sparkles } from 'lucide-react'
 
 const SettingsPage: React.FC = () => {
   const { workspaceId } = useAuth()
@@ -31,6 +32,7 @@ const SettingsPage: React.FC = () => {
   const [tags, setTags] = useState<string[]>([])
   const [botFormat, setBotFormat] = useState<WorkspaceSettings['bot_response_format']>('medio')
   const [botName, setBotName] = useState('Assistente IA')
+  const [botPersonality, setBotPersonality] = useState('')
   const [timezone, setTimezone] = useState('America/Sao_Paulo')
   const [language, setLanguage] = useState('pt-BR')
   const [newCategory, setNewCategory] = useState('')
@@ -44,6 +46,7 @@ const SettingsPage: React.FC = () => {
       setTags((settings.default_tags as string[]) ?? [])
       setBotFormat(settings.bot_response_format)
       setBotName(settings.bot_name ?? 'Assistente IA')
+      setBotPersonality(settings.bot_personality ?? '')
       setTimezone(settings.timezone ?? 'America/Sao_Paulo')
       setLanguage(settings.language ?? 'pt-BR')
     }
@@ -67,7 +70,15 @@ const SettingsPage: React.FC = () => {
     try {
       const { error } = await supabase
         .from('workspace_settings')
-        .update({ default_categories: categories, default_tags: tags, bot_response_format: botFormat, bot_name: botName, timezone, language })
+        .update({
+          default_categories: categories,
+          default_tags: tags,
+          bot_response_format: botFormat,
+          bot_name: botName,
+          bot_personality: botPersonality.trim() || null,
+          timezone,
+          language,
+        })
         .eq('workspace_id', workspaceId)
       if (error) throw error
       toast.success('Configurações salvas')
@@ -81,7 +92,7 @@ const SettingsPage: React.FC = () => {
 
   if (isLoading) return (
     <div className="space-y-4 max-w-2xl">
-      {[...Array(3)].map((_, i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />)}
+      {[...Array(4)].map((_, i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />)}
     </div>
   )
 
@@ -97,6 +108,85 @@ const SettingsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-2xl animate-slide-up">
+      {/* Nome do assistente */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Bot className="w-4 h-4 text-primary" />
+            Nome do Assistente
+          </CardTitle>
+          <CardDescription>Como o bot se identificará nas conversas do WhatsApp/Telegram</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={botName}
+            onChange={e => setBotName(e.target.value)}
+            placeholder="Ex: Assistente IA, Copiloto, Max..."
+            maxLength={50}
+          />
+          <p className="text-xs text-muted-foreground mt-2">Este nome é usado no prompt do assistente e aparecerá nas respostas.</p>
+        </CardContent>
+      </Card>
+
+      {/* Personalidade do bot */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            Personalidade Personalizada
+          </CardTitle>
+          <CardDescription>Instruções extras que definem o comportamento e tom do assistente</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            value={botPersonality}
+            onChange={e => setBotPersonality(e.target.value)}
+            placeholder={`Exemplos:\n• "Seja mais formal e use linguagem profissional"\n• "Sempre sugira formas de economizar quando registrar gastos"\n• "Me chame pelo nome João e use um tom bem descontraído"\n• "Sempre pergunte se preciso de algo mais após cada ação"`}
+            className="min-h-[120px] resize-none"
+            maxLength={500}
+          />
+          <div className="flex justify-between items-center">
+            <p className="text-xs text-muted-foreground">
+              Essas instruções são adicionadas ao prompt base do assistente, personalizando seu comportamento.
+            </p>
+            <span className="text-xs text-muted-foreground">{botPersonality.length}/500</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Formato do bot */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Formato de Resposta do Bot</CardTitle>
+          <CardDescription>Define o nível de detalhe das respostas automáticas</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RadioGroup value={botFormat} onValueChange={v => setBotFormat(v as WorkspaceSettings['bot_response_format'])} className="space-y-3">
+            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+              <RadioGroupItem value="curto" id="curto" />
+              <div>
+                <Label htmlFor="curto" className="cursor-pointer font-medium">Curto</Label>
+                <p className="text-xs text-muted-foreground">Resposta mínima e direta (1-2 linhas)</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+              <RadioGroupItem value="medio" id="medio" />
+              <div>
+                <Label htmlFor="medio" className="cursor-pointer font-medium">Médio</Label>
+                <p className="text-xs text-muted-foreground">Informações essenciais com confirmação clara</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+              <RadioGroupItem value="detalhado" id="detalhado" />
+              <div>
+                <Label htmlFor="detalhado" className="cursor-pointer font-medium">Detalhado</Label>
+                <p className="text-xs text-muted-foreground">Resposta completa com exemplos e sugestões</p>
+              </div>
+            </div>
+          </RadioGroup>
+        </CardContent>
+      </Card>
+
       {/* Categorias */}
       <Card>
         <CardHeader>
@@ -157,56 +247,6 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Nome do assistente */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Nome do Assistente</CardTitle>
-          <CardDescription>Como o bot se identificará nas conversas do WhatsApp/Telegram</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Input
-            value={botName}
-            onChange={e => setBotName(e.target.value)}
-            placeholder="Ex: Assistente IA, Copiloto, Max..."
-            maxLength={50}
-          />
-          <p className="text-xs text-muted-foreground mt-2">Este nome é usado no prompt do assistente e aparecerá nas respostas.</p>
-        </CardContent>
-      </Card>
-
-      {/* Formato do bot */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Formato de Resposta do Bot</CardTitle>
-          <CardDescription>Define o nível de detalhe das respostas automáticas</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RadioGroup value={botFormat} onValueChange={v => setBotFormat(v as WorkspaceSettings['bot_response_format'])} className="space-y-3">
-            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
-              <RadioGroupItem value="curto" id="curto" />
-              <div>
-                <Label htmlFor="curto" className="cursor-pointer font-medium">Curto</Label>
-                <p className="text-xs text-muted-foreground">Resposta mínima e direta</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
-              <RadioGroupItem value="medio" id="medio" />
-              <div>
-                <Label htmlFor="medio" className="cursor-pointer font-medium">Médio</Label>
-                <p className="text-xs text-muted-foreground">Informações essenciais com confirmação</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
-              <RadioGroupItem value="detalhado" id="detalhado" />
-              <div>
-                <Label htmlFor="detalhado" className="cursor-pointer font-medium">Detalhado</Label>
-                <p className="text-xs text-muted-foreground">Resposta completa com todos os dados</p>
-              </div>
-            </div>
-          </RadioGroup>
-        </CardContent>
-      </Card>
-
       {/* Localização */}
       <Card>
         <CardHeader>
@@ -221,7 +261,6 @@ const SettingsPage: React.FC = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-64">
-                {/* Search inside select */}
                 <div className="sticky top-0 bg-popover p-2 border-b">
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
