@@ -90,6 +90,55 @@ Deno.serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY not configured')
 
+    // ── /ajuda command — intercept before AI call ────────────────────────────
+    const textTrimmed = message_text?.trim() ?? ''
+    const isAjudaCommand = /^\/(ajuda|help|comandos|start|menu)$/i.test(textTrimmed) || /^(ajuda|help|comandos|o que você (faz|sabe|pode)|como usar)/i.test(textTrimmed)
+    if (isAjudaCommand && message_type === 'text') {
+      const SUPABASE_URL2 = Deno.env.get('SUPABASE_URL')!
+      const ANON_KEY2 = Deno.env.get('SUPABASE_ANON_KEY')!
+      const { data: ws_settings } = await supabase.from('workspace_settings').select('bot_name').eq('workspace_id', workspace_id).maybeSingle()
+      const botN = (ws_settings as Record<string,unknown>)?.bot_name as string ?? 'Assistente IA'
+      const helpText = `🤖 *${botN} — Lista de Comandos*\n\n` +
+        `📝 *NOTAS*\n` +
+        `• "Anota que..." → salva uma nota\n` +
+        `• "Minhas notas" / "Lista notas" → ver notas recentes\n` +
+        `• "Busca [palavra]" → encontrar notas por texto\n` +
+        `• "Apaga a nota [título]" → remover nota\n\n` +
+        `✅ *TAREFAS*\n` +
+        `• "Cria tarefa: [título]" → nova tarefa\n` +
+        `• "Minhas tarefas" / "Lista tarefas" → tarefas em aberto\n` +
+        `• "Concluí [tarefa]" / "Finalizei [tarefa]" → marcar como feita\n\n` +
+        `⏰ *LEMBRETES*\n` +
+        `• "Me lembra de [X] às [hora]" → criar lembrete\n` +
+        `• "Meus lembretes" → ver próximos lembretes\n` +
+        `• "Cancela lembrete [título]" → remover lembrete\n\n` +
+        `💰 *FINANÇAS*\n` +
+        `• "Gastei R$X de [item]" → registra gasto\n` +
+        `• "Gastos de hoje" / "do mês" → relatório financeiro\n` +
+        `• "Resumo semanal" → resumo da semana\n\n` +
+        `🎤 *ÁUDIO*\n` +
+        `• Envie um áudio → o bot transcreve, interpreta e age\n` +
+        `• "Responde em áudio" / "Manda áudio" → resposta em voz\n\n` +
+        `📊 *RELATÓRIOS*\n` +
+        `• "Resumo da semana" → atividades + gastos + tarefas\n` +
+        `• "Gastos do mês" → total financeiro detalhado\n\n` +
+        `💡 _Você pode falar naturalmente! Não precisa usar comandos exatos._`
+
+      // Save to messages & send
+      await supabase.from('messages').insert({
+        workspace_id, conversation_id, direction: 'OUT', type: 'text',
+        body_text: helpText, timestamp: new Date().toISOString(),
+      })
+      await fetch(`${SUPABASE_URL2}/functions/v1/send-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY2}`, 'apikey': ANON_KEY2 },
+        body: JSON.stringify({ workspace_id, phone: sender_phone, text: helpText }),
+      })
+      return new Response(JSON.stringify({ ok: true, action: 'ajuda' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     // ── 1. Fetch workspace settings + contact name ───────────────────────────
     const [{ data: settings }, { data: contactRow }] = await Promise.all([
       supabase
@@ -666,6 +715,21 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
               },
             },
           },
+          {
+            type: 'function',
+            function: {
+              name: 'weekly_summary',
+              description: 'Gera um resumo completo da semana: tarefas concluídas, novas notas, gastos totais e lembretes disparados. Use quando o usuário pedir "resumo da semana", "o que fiz essa semana", "resumo semanal".',
+              parameters: {
+                type: 'object',
+                properties: {
+                  reply_message: { type: 'string', description: 'Introdução amigável antes do resumo (ex: "Aqui está seu resumo da semana 📊")' },
+                },
+                required: ['reply_message'],
+                additionalProperties: false,
+              },
+            },
+          },
         ],
         tool_choice: 'required',
       }),
@@ -674,15 +738,43 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     if (!aiResponse.ok) {
       const errText = await aiResponse.text()
       console.error('AI gateway error:', aiResponse.status, errText)
+      // If rate limited or payment required, send friendly message
+      if (aiResponse.status === 429) {
+        const fallback = '⚠️ Estou sobrecarregada no momento. Tente novamente em alguns segundos!'
+        await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
+        await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
+        return new Response(JSON.stringify({ ok: false, error: 'rate_limited' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      if (aiResponse.status === 402) {
+        const fallback = '⚠️ Créditos de IA esgotados. Por favor, verifique as configurações do workspace.'
+        await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
+        await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
+        return new Response(JSON.stringify({ ok: false, error: 'payment_required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
       throw new Error(`AI error ${aiResponse.status}: ${errText}`)
     }
 
     const aiData = await aiResponse.json()
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0]
-    if (!toolCall) throw new Error('No tool call returned by AI')
 
-    const fnName = toolCall.function.name
-    const fnArgs = JSON.parse(toolCall.function.arguments)
+    // Robust fallback: if no tool_call, extract text content and use just_reply
+    let fnName: string
+    let fnArgs: Record<string, unknown>
+    if (!toolCall) {
+      const rawContent = aiData.choices?.[0]?.message?.content
+      console.warn('No tool call returned by AI — falling back to content reply:', JSON.stringify(aiData).slice(0, 400))
+      fnName = 'just_reply'
+      fnArgs = { message: rawContent ?? 'Olá! Como posso ajudar? 😊' }
+    } else {
+      fnName = toolCall.function.name
+      try {
+        fnArgs = JSON.parse(toolCall.function.arguments)
+      } catch (parseErr) {
+        console.error('Failed to parse tool arguments JSON:', toolCall.function.arguments, parseErr)
+        fnName = 'just_reply'
+        fnArgs = { message: 'Desculpe, ocorreu um erro ao processar sua mensagem. Pode repetir?' }
+      }
+    }
 
     let replyText = ''
 
@@ -930,9 +1022,75 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       } else {
         replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}".`
       }
+    } else if (fnName === 'weekly_summary') {
+      const now = new Date()
+      const weekStart = new Date(now)
+      weekStart.setDate(now.getDate() - 7)
+      weekStart.setHours(0, 0, 0, 0)
+
+      // Fetch all week data in parallel
+      const [
+        { data: weekNotes },
+        { data: weekTasksDone },
+        { data: weekReminders },
+      ] = await Promise.all([
+        supabase.from('notes').select('id, title, category, created_at').eq('workspace_id', workspace_id).gte('created_at', weekStart.toISOString()).order('created_at', { ascending: false }).limit(20),
+        supabase.from('tasks').select('id, title, status, completed_at').eq('workspace_id', workspace_id).eq('status', 'done').gte('updated_at', weekStart.toISOString()).limit(10),
+        supabase.from('reminders').select('id, title, status').eq('workspace_id', workspace_id).in('status', ['sent', 'scheduled']).gte('remind_at', weekStart.toISOString()).limit(10),
+      ])
+
+      // Financial total for the week
+      const allWeekNotes = weekNotes ?? []
+      const financialNotes = allWeekNotes.filter(n => normalizeFinancialCategory(n.category) || hasFinancialContent(n.title ?? ''))
+      let weekTotal = 0
+      const financialLines: string[] = []
+      for (const fn of financialNotes) {
+        const { data: fullNote } = await supabase.from('notes').select('title, content').eq('id', fn.id).single()
+        if (fullNote) {
+          const text = `${fullNote.title ?? ''} ${fullNote.content ?? ''}`
+          const fin = extractFinancialValues(text)
+          if (fin.total > 0) {
+            weekTotal += fin.total
+            financialLines.push(`  • ${fn.title} — ${formatCurrency(fin.total)}`)
+          }
+        }
+      }
+
+      // Count notes by category
+      const categoryCount: Record<string, number> = {}
+      for (const n of allWeekNotes) {
+        const cat = n.category ?? 'Geral'
+        categoryCount[cat] = (categoryCount[cat] ?? 0) + 1
+      }
+      const notesByCat = Object.entries(categoryCount).map(([c, count]) => `  • ${c}: ${count}`).join('\n') || '  Nenhuma nota.'
+      
+      const tasksDoneList = (weekTasksDone ?? []).length > 0
+        ? (weekTasksDone ?? []).map(t => `  ✅ ${t.title}`).join('\n')
+        : '  Nenhuma tarefa concluída.'
+      
+      const remindersSent = (weekReminders ?? []).filter(r => r.status === 'sent').length
+      const remindersScheduled = (weekReminders ?? []).filter(r => r.status === 'scheduled').length
+
+      const sections: string[] = [
+        `${fnArgs.reply_message}`,
+        ``,
+        `📝 *Notas criadas (${allWeekNotes.length}):*\n${notesByCat}`,
+        ``,
+        `✅ *Tarefas concluídas (${(weekTasksDone ?? []).length}):*\n${tasksDoneList}`,
+        ``,
+        `⏰ *Lembretes:* ${remindersSent} disparados, ${remindersScheduled} agendados`,
+      ]
+      if (weekTotal > 0) {
+        sections.push(``)
+        sections.push(`💰 *Gastos da semana (${financialLines.length} registros):*\n${financialLines.slice(0, 5).join('\n')}\n  *Total: ${formatCurrency(weekTotal)}*`)
+      } else {
+        sections.push(``)
+        sections.push(`💰 *Gastos:* Nenhum gasto registrado na semana.`)
+      }
+      replyText = sections.join('\n')
     } else {
       // just_reply
-      replyText = fnArgs.message ?? 'Olá! Como posso ajudar? 😊'
+      replyText = (fnArgs.message as string) ?? 'Olá! Como posso ajudar? 😊'
     }
 
     // ── 10. Save AI reply to messages table ──────────────────────────────────
