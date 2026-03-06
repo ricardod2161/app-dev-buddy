@@ -948,10 +948,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     // ── 11. Send reply to user ────────────────────────────────────────────────
     await sendReply({ supabase, provider, workspace_id, sender_phone, replyText })
 
-    // ── 12. TTS audio reply — only when user sent an audio message AND tts is enabled ──
+    // ── 12. TTS audio reply ──────────────────────────────────────────────────────
+    // Triggers when: (a) user sent audio, OR (b) user explicitly requested audio reply in text
     const ttsEnabled = (settings as Record<string, unknown>)?.tts_enabled === true
     const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'nPczCjzI2devNBz1zQrb'
-    if (message_type === 'audio' && ttsEnabled) {
+    const userRequestedAudio = message_type === 'text' && /respond[ae]\s*(em\s*)?[áa]udio|manda\s*(em\s*)?[áa]udio|fala\s*(em\s*)?[áa]udio|me\s*(mand[ae]|respond[ae])\s*(em\s*)?[áa]udio|em\s*[áa]udio|via\s*[áa]udio|[áa]udio\s*(please|pf|pfv|por\s*favor)?/i.test(message_text ?? '')
+    const shouldSendAudio = ttsEnabled && (message_type === 'audio' || userRequestedAudio)
+    if (shouldSendAudio) {
       try {
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
