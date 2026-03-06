@@ -18,6 +18,7 @@ import WhitelistPage from "@/pages/app/Whitelist"
 import SettingsPage from "@/pages/app/Settings"
 import LogsPage from "@/pages/app/Logs"
 import RemindersPage from "@/pages/app/Reminders"
+import ContactsPage from "@/pages/app/Contacts"
 import NotFound from "./pages/NotFound"
 
 const queryClient = new QueryClient({
@@ -43,6 +44,7 @@ const App = () => (
                 <Route path="/app/tasks" element={<TasksPage />} />
                 <Route path="/app/reports" element={<ReportsPage />} />
                 <Route path="/app/conversations" element={<ConversationsPage />} />
+                <Route path="/app/contacts" element={<ContactsPage />} />
                 <Route path="/app/reminders" element={<RemindersPage />} />
                 <Route path="/app/integrations" element={<IntegrationsPage />} />
                 <Route path="/app/whitelist" element={<WhitelistPage />} />

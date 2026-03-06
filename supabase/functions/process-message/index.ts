@@ -84,17 +84,27 @@ Deno.serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY not configured')
 
-    // ── 1. Fetch workspace settings ──────────────────────────────────────────
-    const { data: settings } = await supabase
-      .from('workspace_settings')
-      .select('bot_response_format, language, timezone, bot_name, bot_personality, default_categories, default_tags')
-      .eq('workspace_id', workspace_id)
-      .maybeSingle()
+    // ── 1. Fetch workspace settings + contact name ───────────────────────────
+    const [{ data: settings }, { data: contactRow }] = await Promise.all([
+      supabase
+        .from('workspace_settings')
+        .select('bot_response_format, language, timezone, bot_name, bot_personality, default_categories, default_tags')
+        .eq('workspace_id', workspace_id)
+        .maybeSingle(),
+      supabase
+        .from('contacts')
+        .select('name, notes')
+        .eq('workspace_id', workspace_id)
+        .eq('phone_e164', sender_phone)
+        .maybeSingle(),
+    ])
 
     const responseFormat = settings?.bot_response_format ?? 'medio'
     const botName = (settings as Record<string, unknown>)?.bot_name as string ?? 'Assistente IA'
     const botPersonality = (settings as Record<string, unknown>)?.bot_personality as string | null ?? null
     const tz = (settings as Record<string, unknown>)?.timezone as string ?? 'America/Sao_Paulo'
+    const contactName = contactRow?.name ?? null
+    const contactNotes = contactRow?.notes ?? null
 
     // ── Date/time awareness ──────────────────────────────────────────────────
     const nowStr = new Date().toLocaleString('pt-BR', {
@@ -156,22 +166,27 @@ Deno.serve(async (req) => {
         .gte('remind_at', new Date().toISOString())
         .order('remind_at', { ascending: true })
         .limit(5),
-      // today's financial notes for total spend context
+      // today's financial notes (dual-query for context total)
       supabase
         .from('notes')
         .select('title, content')
         .eq('workspace_id', workspace_id)
-        .eq('category', 'Financeiro')
+        .or(`category.eq.Financeiro,title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%`)
         .gte('created_at', todayStart.toISOString()),
     ])
 
     const history = (historyRows ?? []).reverse()
 
-    // Compute today's spend total from financial notes
+    // Compute today's spend total from financial notes (deduplicated by title)
     let todaySpendTotal = 0
+    const seenTitlesForSpend = new Set<string>()
     for (const fn of todayFinancialNotes ?? []) {
-      const text = `${fn.title ?? ''} ${fn.content ?? ''}`
-      todaySpendTotal += extractFinancialValues(text).total
+      const key = fn.title ?? ''
+      if (!seenTitlesForSpend.has(key)) {
+        seenTitlesForSpend.add(key)
+        const text = `${fn.title ?? ''} ${fn.content ?? ''}`
+        todaySpendTotal += extractFinancialValues(text).total
+      }
     }
 
     // ── 3. Handle multimodal content ─────────────────────────────────────────
@@ -264,11 +279,16 @@ Deno.serve(async (req) => {
       ? `\n💰 Gastos registrados hoje: ${formatCurrency(todaySpendTotal)}`
       : ''
 
+    // Contact context for prompt
+    const contactContext = contactName
+      ? `\n## Usuário\nO usuário se chama **${contactName}**.${contactNotes ? ` Observações: ${contactNotes}` : ''} Use o nome dele nas respostas de forma natural.`
+      : ''
+
     // ── 6. Build system prompt (elite) ───────────────────────────────────────
     const systemPrompt = `Você é **${botName}**, o assistente pessoal mais inteligente e útil do mundo, integrado diretamente ao WhatsApp/Telegram do usuário.
 
 📅 Data e hora atual: ${nowStr}
-
+${contactContext}
 ## Sua Missão
 Ajudar o usuário a organizar sua vida com máxima eficiência. Você é proativo, contextual e sempre sugere a ação mais útil. Você tem memória completa desta conversa.
 
@@ -280,10 +300,11 @@ Ajudar o usuário a organizar sua vida com máxima eficiência. Você é proativ
 - **Respostas**: conversar, responder perguntas, dar conselhos
 
 ## Inteligência Financeira 💰
-Quando o usuário mencionar valores monetários (ex: "gastei 20 reais de lanche", "R$50 de gasolina", "rapadura 3 reais"):
-→ Use **create_note** com category="Financeiro"
+Quando o usuário mencionar valores monetários (ex: "gastei 20 reais de lanche", "R$50 de gasolina", "rapadura 3 reais", "uma rapadura e um doce 15 reais"):
+→ Use **create_note** com category="Financeiro" SEMPRE
 → Extraia cada item e valor no conteúdo de forma estruturada: "• Item: R$valor"
-→ Confirme com emoji: "✅ Gasto registrado: [item] - ${formatCurrency(0)}..."
+→ Confirme com emoji: "✅ Gasto registrado: [itens] - Total: R$xx,xx"
+→ Se mencionou vários itens num valor só, distribua igualmente ou coloque o total
 
 ## Contexto Atual do Usuário
 **Notas recentes (${recentNotes?.length ?? 0} total):**
@@ -662,21 +683,39 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         dateFrom = new Date(now); dateFrom.setDate(1); dateFrom.setHours(0, 0, 0, 0)
       }
 
-      const { data: financialNotes } = await supabase
-        .from('notes')
-        .select('title, content, created_at')
-        .eq('workspace_id', workspace_id)
-        .eq('category', 'Financeiro')
-        .gte('created_at', dateFrom.toISOString())
-        .order('created_at', { ascending: false })
+      // Dual-query strategy: tagged Financeiro + any note with monetary content
+      const [{ data: taggedNotes }, { data: untaggedNotes }] = await Promise.all([
+        supabase
+          .from('notes')
+          .select('id, title, content, created_at')
+          .eq('workspace_id', workspace_id)
+          .eq('category', 'Financeiro')
+          .gte('created_at', dateFrom.toISOString())
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('notes')
+          .select('id, title, content, created_at')
+          .eq('workspace_id', workspace_id)
+          .neq('category', 'Financeiro')
+          .gte('created_at', dateFrom.toISOString())
+          .or('title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%,title.ilike.% real%,content.ilike.% real%')
+          .order('created_at', { ascending: false }),
+      ])
 
-      if (!financialNotes?.length) {
+      // Merge, deduplicate by id
+      const seenIds = new Set<string>()
+      const allFinancialNotes: typeof taggedNotes = []
+      for (const n of [...(taggedNotes ?? []), ...(untaggedNotes ?? [])]) {
+        if (!seenIds.has(n.id)) { seenIds.add(n.id); allFinancialNotes.push(n) }
+      }
+
+      if (!allFinancialNotes.length) {
         const periodLabel = fnArgs.period === 'hoje' ? 'hoje' : fnArgs.period === 'semana' ? 'nos últimos 7 dias' : 'este mês'
         replyText = `💰 Nenhum gasto registrado ${periodLabel}.`
       } else {
         let grandTotal = 0
         const lines: string[] = []
-        for (const fn of financialNotes) {
+        for (const fn of allFinancialNotes) {
           const text = `${fn.title ?? ''} ${fn.content ?? ''}`
           const fin = extractFinancialValues(text)
           if (fin.total > 0) {

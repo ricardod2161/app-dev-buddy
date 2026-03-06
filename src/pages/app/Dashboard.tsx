@@ -11,10 +11,31 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { FileText, CheckSquare, Bell, MessageSquare, Clock } from 'lucide-react'
+import { FileText, CheckSquare, Bell, MessageSquare, Clock, TrendingDown } from 'lucide-react'
 import { format, subDays, startOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { stripHtml, truncate } from '@/lib/utils'
+
+function parseMoneyFromText(text: string): number {
+  const patterns = [
+    /R\$\s*([\d]+(?:[.,]\d{1,2})?)/gi,
+    /([\d]+(?:[.,]\d{1,2})?)\s*(?:reais|real)/gi,
+  ]
+  let total = 0
+  const seen = new Set<string>()
+  for (const pattern of patterns) {
+    let m: RegExpExecArray | null
+    while ((m = pattern.exec(text)) !== null) {
+      const key = m[1]
+      if (!seen.has(key)) {
+        seen.add(key)
+        const v = parseFloat(m[1].replace(',', '.'))
+        if (!isNaN(v) && v > 0) total += v
+      }
+    }
+  }
+  return total
+}
 
 const priorityColors: Record<string, string> = {
   high: 'bg-destructive/10 text-destructive border-destructive/20',
@@ -116,6 +137,25 @@ const DashboardPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  // Today's financial spend
+  const { data: todaySpend, isLoading: loadingSpend } = useQuery({
+    queryKey: ['dashboard-spend-today', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return 0
+      const [{ data: taggedNotes }, { data: otherNotes }] = await Promise.all([
+        supabase.from('notes').select('title, content')
+          .eq('workspace_id', workspaceId).eq('category', 'Financeiro').gte('created_at', today),
+        supabase.from('notes').select('title, content')
+          .eq('workspace_id', workspaceId).gte('created_at', today)
+          .neq('category', 'Financeiro')
+          .or('title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%'),
+      ])
+      const allNotes = [...(taggedNotes ?? []), ...(otherNotes ?? [])]
+      return allNotes.reduce((sum, n) => sum + parseMoneyFromText(`${n.title ?? ''} ${n.content ?? ''}`), 0)
+    },
+    enabled: !!workspaceId,
+  })
+
   // Recent activity
   const { data: recentNotes } = useQuery({
     queryKey: ['dashboard-recent-notes', workspaceId],
@@ -145,18 +185,23 @@ const DashboardPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  const spendDisplay = todaySpend != null && todaySpend > 0
+    ? todaySpend.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    : 'R$ 0,00'
+
   const metrics = [
-    { label: 'Notas Hoje', value: notesCount, icon: FileText, loading: loadingNotes, color: 'text-primary', bg: 'bg-primary/10' },
-    { label: 'Tarefas Pendentes', value: tasksCount, icon: CheckSquare, loading: loadingTasks, color: 'text-yellow-500', bg: 'bg-yellow-100 dark:bg-yellow-900/20' },
-    { label: 'Lembretes (24h)', value: remindersCount, icon: Bell, loading: loadingReminders, color: 'text-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/20' },
-    { label: 'Mensagens Hoje', value: messagesCount, icon: MessageSquare, loading: loadingMessages, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/20' },
+    { label: 'Notas Hoje', value: notesCount, icon: FileText, loading: loadingNotes, color: 'text-primary', bg: 'bg-primary/10', isText: false },
+    { label: 'Tarefas Pendentes', value: tasksCount, icon: CheckSquare, loading: loadingTasks, color: 'text-yellow-500', bg: 'bg-yellow-100 dark:bg-yellow-900/20', isText: false },
+    { label: 'Lembretes (24h)', value: remindersCount, icon: Bell, loading: loadingReminders, color: 'text-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/20', isText: false },
+    { label: 'Mensagens Hoje', value: messagesCount, icon: MessageSquare, loading: loadingMessages, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/20', isText: false },
+    { label: 'Gastos Hoje', value: spendDisplay, icon: TrendingDown, loading: loadingSpend, color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/20', isText: true },
   ]
 
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
-        {metrics.map(({ label, value, icon: Icon, loading, color, bg }) => (
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
+        {metrics.map(({ label, value, icon: Icon, loading, color, bg, isText }) => (
           <Card key={label} className="hover:shadow-md transition-shadow">
             <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
@@ -167,7 +212,9 @@ const DashboardPage: React.FC = () => {
               </div>
               {loading
                 ? <Skeleton className="h-8 w-16" />
-                : <p className="text-2xl sm:text-3xl font-bold text-foreground">{value ?? 0}</p>
+                : isText
+                  ? <p className="text-lg sm:text-xl font-bold text-foreground">{value}</p>
+                  : <p className="text-2xl sm:text-3xl font-bold text-foreground">{value ?? 0}</p>
               }
             </CardContent>
           </Card>

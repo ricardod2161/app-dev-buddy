@@ -62,6 +62,47 @@ export type Database = {
           },
         ]
       }
+      contacts: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          notes: string | null
+          phone_e164: string
+          tags: Json | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          phone_e164: string
+          tags?: Json | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          phone_e164?: string
+          tags?: Json | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           contact_name: string | null

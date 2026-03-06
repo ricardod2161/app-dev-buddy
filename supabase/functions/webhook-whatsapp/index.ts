@@ -254,17 +254,26 @@ Deno.serve(async (req) => {
       .eq('contact_phone', phoneE164)
       .maybeSingle()
 
+    // Look up contact name from contacts table
+    const { data: contactRow } = await supabase
+      .from('contacts')
+      .select('name')
+      .eq('workspace_id', workspaceId)
+      .eq('phone_e164', phoneE164)
+      .maybeSingle()
+    const contactName = contactRow?.name ?? null
+
     let conversationId: string
     if (existingConv) {
       conversationId = existingConv.id
-      await supabase.from('conversations').update({
-        last_message_at: new Date().toISOString(),
-        provider,
-      }).eq('id', conversationId)
+      const updatePayload: Record<string, unknown> = { last_message_at: new Date().toISOString(), provider }
+      if (contactName) updatePayload.contact_name = contactName
+      await supabase.from('conversations').update(updatePayload).eq('id', conversationId)
     } else {
       const { data: newConv, error: convErr } = await supabase.from('conversations').insert({
         workspace_id: workspaceId,
         contact_phone: phoneE164,
+        contact_name: contactName,
         provider,
         last_message_at: new Date().toISOString(),
       }).select('id').single()
@@ -279,10 +288,9 @@ Deno.serve(async (req) => {
           .maybeSingle()
         if (!retryConv) throw new Error(`Failed to create/find conversation: ${convErr?.message ?? 'unknown'}`)
         conversationId = retryConv.id
-        await supabase.from('conversations').update({
-          last_message_at: new Date().toISOString(),
-          provider,
-        }).eq('id', conversationId)
+        const retryUpdate: Record<string, unknown> = { last_message_at: new Date().toISOString(), provider }
+        if (contactName) retryUpdate.contact_name = contactName
+        await supabase.from('conversations').update(retryUpdate).eq('id', conversationId)
       } else {
         conversationId = newConv.id
       }
