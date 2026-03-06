@@ -71,6 +71,42 @@ const RegisterPage: React.FC = () => {
         bot_response_format: 'medio', timezone: 'America/Sao_Paulo', language: 'pt-BR',
       })
 
+      // Seed de dados de exemplo
+      await Promise.all([
+        supabase.from('notes').insert([
+          {
+            workspace_id: ws.id,
+            title: 'Bem-vindo ao sistema!',
+            content: '<p>Esta é uma nota de exemplo. Você pode criar notas via WhatsApp ou diretamente aqui. Use tags, categorias e projetos para organizar.</p>',
+            category: 'Pessoal',
+            tags: ['importante'],
+          },
+          {
+            workspace_id: ws.id,
+            title: 'Como usar as integrações',
+            content: '<p>Configure sua integração com WhatsApp (Evolution API) ou Telegram nas configurações de integrações. Depois adicione seu número na Whitelist para começar a receber mensagens.</p>',
+            category: 'Trabalho',
+            tags: ['revisão'],
+          },
+        ]),
+        supabase.from('tasks').insert([
+          {
+            workspace_id: ws.id,
+            title: 'Configurar integração WhatsApp ou Telegram',
+            description: 'Vá em Integrações e configure sua conexão com WhatsApp (Evolution API) ou Telegram Bot.',
+            status: 'todo',
+            priority: 'high',
+          },
+          {
+            workspace_id: ws.id,
+            title: 'Adicionar número à Whitelist',
+            description: 'Acesse Whitelist e adicione os números que podem enviar comandos ao sistema.',
+            status: 'todo',
+            priority: 'medium',
+          },
+        ]),
+      ])
+
       toast.success('Conta criada com sucesso! Bem-vindo(a)!')
       navigate('/app')
     } catch (err: unknown) {
