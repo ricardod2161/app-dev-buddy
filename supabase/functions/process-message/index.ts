@@ -244,6 +244,9 @@ Deno.serve(async (req) => {
     }
 
     // ── 4. Transcribe audio ──────────────────────────────────────────────────
+    // The Lovable AI gateway only supports 'text' and 'image_url' content types.
+    // Gemini models accept audio via data URI in the image_url field (e.g. data:audio/ogg;base64,...).
+    // 'input_audio' is NOT supported by the gateway and will always return 400.
     if (message_type === 'audio' && mediaInlineData) {
       console.log('Audio transcription starting:', {
         hasBase64: !!mediaInlineData.data,
@@ -254,71 +257,24 @@ Deno.serve(async (req) => {
 
       let transcribed = false
 
-      // Primary: OpenAI gpt-5-mini with input_audio format (Whisper-compatible)
-      // Format: { data: base64, format: 'mp3' | 'wav' }
-      // WhatsApp sends OGG/OPUS — we treat as mp3 which the API handles gracefully
-      try {
-        const audioFormat = mediaInlineData.mime_type?.includes('wav') ? 'wav' : 'mp3'
-        const transcribeRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'openai/gpt-5-mini',
-            messages: [{
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Transcreva fielmente este áudio em português brasileiro. Retorne APENAS a transcrição, sem nenhum comentário ou explicação adicional.',
-                },
-                {
-                  type: 'input_audio',
-                  input_audio: {
-                    data: mediaInlineData.data,
-                    format: audioFormat,
-                  },
-                },
-              ],
-            }],
-          }),
-        })
-
-        if (transcribeRes.ok) {
-          const transcribeData = await transcribeRes.json()
-          const transcription = transcribeData.choices?.[0]?.message?.content?.trim()
-          if (transcription && transcription.length > 2) {
-            effectiveText = `[Áudio transcrito]: ${transcription}`
-            transcribed = true
-            console.log('Audio transcribed (primary openai/gpt-5-mini):', transcription.slice(0, 100))
-          } else {
-            console.warn('Primary transcription returned empty/short result:', transcribeData)
-          }
-        } else {
-          const errBody = await transcribeRes.text()
-          console.warn(`Primary transcription HTTP ${transcribeRes.status}:`, errBody.slice(0, 300))
-        }
-      } catch (e) {
-        console.error('Primary audio transcription exception:', e)
-      }
-
-      // Fallback: Gemini multimodal with inline_data format
-      if (!transcribed) {
-        console.log('Trying fallback transcription with gemini-2.5-flash (inline_data format)...')
+      // Primary: Gemini 2.5 Pro via image_url with audio data URI
+      // Gemini natively handles audio/ogg, audio/mp4, audio/mpeg etc via data URIs
+      for (const model of ['google/gemini-2.5-pro', 'google/gemini-2.5-flash']) {
+        if (transcribed) break
         try {
-          const fallbackRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          const transcribeRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
             method: 'POST',
             headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: 'google/gemini-2.5-flash',
+              model,
               messages: [{
                 role: 'user',
                 content: [
                   {
                     type: 'text',
-                    text: 'Transcreva fielmente este áudio em português brasileiro. Retorne APENAS a transcrição.',
+                    text: 'Transcreva fielmente este áudio em português brasileiro. Retorne APENAS a transcrição, sem nenhum comentário, tradução ou explicação. Apenas o texto falado.',
                   },
                   {
-                    // Gemini uses inline_data format for multimodal
                     type: 'image_url',
                     image_url: {
                       url: `data:${mediaInlineData.mime_type};base64,${mediaInlineData.data}`,
@@ -329,27 +285,27 @@ Deno.serve(async (req) => {
             }),
           })
 
-          if (fallbackRes.ok) {
-            const fallbackData = await fallbackRes.json()
-            const fallbackTranscription = fallbackData.choices?.[0]?.message?.content?.trim()
-            if (fallbackTranscription && fallbackTranscription.length > 2) {
-              effectiveText = `[Áudio transcrito]: ${fallbackTranscription}`
+          if (transcribeRes.ok) {
+            const transcribeData = await transcribeRes.json()
+            const transcription = transcribeData.choices?.[0]?.message?.content?.trim()
+            if (transcription && transcription.length > 2) {
+              effectiveText = `[Áudio transcrito]: ${transcription}`
               transcribed = true
-              console.log('Audio transcribed (fallback gemini-2.5-flash):', fallbackTranscription.slice(0, 100))
+              console.log(`Audio transcribed (${model}):`, transcription.slice(0, 150))
             } else {
-              console.warn('Fallback transcription also returned empty result')
+              console.warn(`${model} returned empty transcription:`, JSON.stringify(transcribeData).slice(0, 200))
             }
           } else {
-            const errText = await fallbackRes.text()
-            console.warn(`Fallback transcription HTTP ${fallbackRes.status}:`, errText.slice(0, 300))
+            const errBody = await transcribeRes.text()
+            console.warn(`${model} transcription HTTP ${transcribeRes.status}:`, errBody.slice(0, 400))
           }
         } catch (e) {
-          console.error('Fallback audio transcription exception:', e)
+          console.error(`${model} transcription exception:`, e)
         }
       }
 
       if (!transcribed) {
-        console.error('All transcription attempts failed — using friendly fallback')
+        console.error('All transcription attempts failed')
         effectiveText = '[Áudio recebido mas não foi possível transcrever automaticamente. Por favor, reenvie o áudio ou escreva a mensagem em texto.]'
       }
     }
