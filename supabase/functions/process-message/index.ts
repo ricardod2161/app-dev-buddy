@@ -951,30 +951,41 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     // ── 12. TTS audio reply ──────────────────────────────────────────────────────
     // Triggers when: (a) user sent audio, OR (b) user explicitly requested audio reply in text
     const ttsEnabled = (settings as Record<string, unknown>)?.tts_enabled === true
-    const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'nPczCjzI2devNBz1zQrb'
-    // Detect user request for audio reply — broad match including "mim responda em áudio", "me fala em audio", etc.
+    const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'FGY2WhTYpPnrIDTdsKH5'
+    // Detect user request for audio reply — broad match
     const userRequestedAudio = message_type === 'text' && /[áa][u]?[d]?[i]?[o]|respond[ae].*[áa]udio|[áa]udio.*respond|mim\s+respond|me\s+respond.*[áa]udio|fala.*[áa]udio|[áa]udio.*fala|manda.*[áa]udio|[áa]udio.*manda|em\s+[áa]udio|voz\s*(please|pf|pfv|por\s*favor)?/i.test(message_text ?? '')
     const shouldSendAudio = ttsEnabled && (message_type === 'audio' || userRequestedAudio)
+
+    console.log(`[TTS] ttsEnabled=${ttsEnabled} | message_type=${message_type} | userRequestedAudio=${userRequestedAudio} | shouldSendAudio=${shouldSendAudio} | voice=${ttsVoiceId}`)
+
     if (shouldSendAudio) {
       try {
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
+        console.log(`[TTS] Chamando tts-function com voice_id=${ttsVoiceId} | texto=${replyText.slice(0, 80)}...`)
         const ttsRes = await fetch(`${SUPABASE_URL}/functions/v1/elevenlabs-tts`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'apikey': SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({ text: replyText, voice_id: ttsVoiceId }),
         })
         if (ttsRes.ok) {
           const { base64, content_type } = await ttsRes.json()
-          await sendAudioReply({ supabase, provider, workspace_id, phone: sender_phone, base64, content_type })
+          console.log(`[TTS] Áudio gerado — content_type=${content_type} | base64_len=${base64?.length ?? 0}`)
+          // Evolution API expects phone WITHOUT leading +
+          const phoneClean = sender_phone.replace(/^\+/, '')
+          console.log(`[TTS] Enviando áudio para phone=${phoneClean} via provider=${provider}`)
+          await sendAudioReply({ supabase, provider, workspace_id, phone: phoneClean, base64, content_type })
+          console.log(`[TTS] sendAudioReply concluído`)
         } else {
-          console.warn('TTS request failed:', ttsRes.status, await ttsRes.text())
+          const errBody = await ttsRes.text()
+          console.error(`[TTS] Falha na geração de áudio: status=${ttsRes.status} | body=${errBody.slice(0, 500)}`)
         }
       } catch (ttsErr) {
-        console.warn('TTS step failed (non-blocking):', ttsErr)
+        console.error('[TTS] Erro inesperado no bloco TTS:', ttsErr)
       }
     }
 
