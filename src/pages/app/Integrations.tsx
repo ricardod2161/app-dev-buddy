@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckCircle, XCircle, Loader2, Send, Zap, BookOpen, Copy, ExternalLink, AlertCircle, Info } from 'lucide-react'
+import { CheckCircle, XCircle, Loader2, Send, Zap, BookOpen, Copy, ExternalLink, AlertCircle, Info, RefreshCw } from 'lucide-react'
 
 const SUPABASE_PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID as string
 
