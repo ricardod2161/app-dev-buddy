@@ -70,35 +70,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   useEffect(() => {
-    // Configurar listener ANTES de getSession
+    let initialized = false
+
+    // Carregar sessão existente primeiro
+    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
+      if (!initialized) {
+        initialized = true
+        setSession(existingSession)
+        setUser(existingSession?.user ?? null)
+
+        if (existingSession?.user) {
+          Promise.all([
+            loadProfile(existingSession.user.id),
+            loadWorkspace(existingSession.user.id),
+          ]).finally(() => setLoading(false))
+        } else {
+          setLoading(false)
+        }
+      }
+    }).catch(() => {
+      if (!initialized) {
+        initialized = true
+        setLoading(false)
+      }
+    })
+
+    // Listener para mudanças de autenticação (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
         setSession(newSession)
         setUser(newSession?.user ?? null)
 
         if (newSession?.user) {
-          await loadProfile(newSession.user.id)
-          await loadWorkspace(newSession.user.id)
+          await Promise.all([
+            loadProfile(newSession.user.id),
+            loadWorkspace(newSession.user.id),
+          ])
         } else {
           setProfile(null)
           setWorkspace(null)
+        }
+
+        if (!initialized) {
+          initialized = true
         }
         setLoading(false)
       }
     )
 
-    // Carregar sessão existente
-    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
-      if (existingSession) {
-        setSession(existingSession)
-        setUser(existingSession.user)
-        loadProfile(existingSession.user.id)
-        loadWorkspace(existingSession.user.id)
+    // Fallback: garantir que o loading seja removido após 5s no máximo
+    const timeout = setTimeout(() => {
+      if (!initialized) {
+        initialized = true
+        setLoading(false)
       }
-      setLoading(false)
-    })
+    }, 5000)
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(timeout)
+    }
   }, [])
 
   const signOut = async () => {
