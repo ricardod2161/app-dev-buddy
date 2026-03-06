@@ -1,5 +1,5 @@
 import React from 'react'
-import { Moon, Sun, LogOut, User, Menu } from 'lucide-react'
+import { Moon, Sun, LogOut, Settings, Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useSidebarCtx } from '@/layouts/AppLayout'
 
 const pageTitles: Record<string, string> = {
@@ -32,6 +32,7 @@ export const TopBar: React.FC = () => {
   const { profile, signOut } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
+  const navigate = useNavigate()
   const { toggleMobile } = useSidebarCtx()
 
   const title = pageTitles[location.pathname] ?? 'Assistente WhatsApp'
@@ -83,9 +84,9 @@ export const TopBar: React.FC = () => {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <User className="w-4 h-4 mr-2" />
-              Meu Perfil
+            <DropdownMenuItem onClick={() => navigate('/app/settings')}>
+              <Settings className="w-4 h-4 mr-2" />
+              Configurações
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

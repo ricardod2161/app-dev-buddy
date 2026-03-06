@@ -16,11 +16,15 @@ import { SyntaxHighlighter } from '@/components/SyntaxHighlighter'
 import { ChevronLeft, ChevronRight, ScrollText } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 
-const statusConfig: Record<WebhookLog['status'], { label: string; class: string }> = {
+const statusConfig: Record<string, { label: string; class: string }> = {
   ok: { label: 'OK', class: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400' },
   error: { label: 'Erro', class: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400' },
   auth_error: { label: 'Auth Error', class: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400' },
   rate_limited: { label: 'Rate Limited', class: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400' },
+  processing: { label: 'Processando', class: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400' },
+  ignored: { label: 'Ignorado', class: 'bg-muted text-muted-foreground border-border' },
+  duplicate: { label: 'Duplicado', class: 'bg-muted text-muted-foreground border-border' },
+  whitelist_blocked: { label: 'Bloqueado', class: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400' },
 }
 
 const PAGE_SIZE = 50
@@ -89,6 +93,10 @@ const LogsPage: React.FC = () => {
             <SelectItem value="error">Erro</SelectItem>
             <SelectItem value="auth_error">Auth Error</SelectItem>
             <SelectItem value="rate_limited">Rate Limited</SelectItem>
+            <SelectItem value="processing">Processando</SelectItem>
+            <SelectItem value="ignored">Ignorado</SelectItem>
+            <SelectItem value="duplicate">Duplicado</SelectItem>
+            <SelectItem value="whitelist_blocked">Bloqueado</SelectItem>
           </SelectContent>
         </Select>
         <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-36 sm:w-40" />
@@ -126,7 +134,7 @@ const LogsPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-border">
                 {logs.map(log => {
-                  const sc = statusConfig[log.status]
+                  const sc = statusConfig[log.status ?? 'ok'] ?? { label: log.status ?? '—', class: 'bg-muted text-muted-foreground border-border' }
                   return (
                     <tr
                       key={log.id}
@@ -181,10 +189,11 @@ const LogsPage: React.FC = () => {
           </SheetHeader>
           {selectedLog && (
             <div className="mt-4 space-y-4">
-              <div className="flex gap-2 flex-wrap">
-                <Badge variant="outline" className={`${statusConfig[selectedLog.status].class}`}>
-                  {statusConfig[selectedLog.status].label}
-                </Badge>
+          <div className="flex gap-2 flex-wrap">
+                {(() => {
+                  const sc = statusConfig[selectedLog.status ?? 'ok'] ?? { label: selectedLog.status ?? '—', class: 'bg-muted text-muted-foreground border-border' }
+                  return <Badge variant="outline" className={sc.class}>{sc.label}</Badge>
+                })()}
                 {selectedLog.error && (
                   <span className="text-sm text-destructive">{selectedLog.error}</span>
                 )}
