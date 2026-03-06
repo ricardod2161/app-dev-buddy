@@ -1073,7 +1073,7 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
   const provider = integration.provider as string
 
   if (provider === 'EVOLUTION') {
-    await fetch(`${integration.api_url}/message/sendText/${integration.instance_id}`, {
+    const res = await fetch(`${integration.api_url}/message/sendText/${integration.instance_id}`, {
       method: 'POST',
       headers: {
         apikey: (integration.api_key_encrypted as string) ?? '',
@@ -1081,8 +1081,14 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
       },
       body: JSON.stringify({ number: phone, text }),
     })
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error(`[dispatchReply] EVOLUTION sendText failed (${res.status}):`, errBody.slice(0, 300))
+    } else {
+      console.log(`[dispatchReply] EVOLUTION sendText OK → phone=${phone}`)
+    }
   } else if (provider === 'CLOUD') {
-    await fetch(`https://graph.facebook.com/v19.0/${integration.phone_number}/messages`, {
+    const res = await fetch(`https://graph.facebook.com/v19.0/${integration.phone_number}/messages`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${integration.api_key_encrypted}`,
@@ -1095,13 +1101,25 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
         text: { body: text },
       }),
     })
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error(`[dispatchReply] CLOUD sendText failed (${res.status}):`, errBody.slice(0, 300))
+    } else {
+      console.log(`[dispatchReply] CLOUD sendText OK → phone=${phone}`)
+    }
   } else if (provider === 'TELEGRAM') {
     const chatId = phone.startsWith('tg:') ? phone.slice(3) : phone
-    await fetch(`https://api.telegram.org/bot${integration.telegram_bot_token_encrypted}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${integration.telegram_bot_token_encrypted}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
     })
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error(`[dispatchReply] TELEGRAM sendMessage failed (${res.status}):`, errBody.slice(0, 300))
+    } else {
+      console.log(`[dispatchReply] TELEGRAM sendMessage OK → chat=${chatId}`)
+    }
   }
 }
 
