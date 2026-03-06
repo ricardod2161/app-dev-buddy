@@ -61,7 +61,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .select('*')
         .eq('id', memberData.workspace_id)
         .single()
-      if (wsData) setWorkspace(wsData as Workspace)
+      if (wsData) {
+        setWorkspace(wsData as Workspace)
+        return
+      }
+    }
+
+    // Auto-recovery: create workspace if user has none
+    try {
+      const { data: ws, error: wsErr } = await supabase
+        .from('workspaces')
+        .insert({ name: 'Meu Workspace', owner_user_id: userId })
+        .select()
+        .single()
+      if (!wsErr && ws) {
+        await supabase.from('workspace_members').insert({ workspace_id: ws.id, user_id: userId, role: 'admin' })
+        await supabase.from('workspace_settings').insert({ workspace_id: ws.id })
+        setWorkspace(ws as Workspace)
+      }
+    } catch {
+      // silently fail — workspaceId stays null
     }
   }
 

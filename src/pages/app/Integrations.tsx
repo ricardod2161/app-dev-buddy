@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckCircle, XCircle, Loader2, Send, Zap, BookOpen, Copy, ExternalLink, AlertCircle, Info } from 'lucide-react'
+import { CheckCircle, XCircle, Loader2, Send, Zap, BookOpen, Copy, ExternalLink, AlertCircle, Info, RefreshCw } from 'lucide-react'
 
 const SUPABASE_PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID as string
 
@@ -406,7 +406,8 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
 }
 
 const IntegrationsPage: React.FC = () => {
-  const { workspaceId, loading: authLoading } = useAuth()
+  const { workspaceId, loading: authLoading, refreshWorkspace } = useAuth()
+  const [retrying, setRetrying] = useState(false)
 
   const { data: integrations, isLoading } = useQuery({
     queryKey: ['integrations', workspaceId],
@@ -422,6 +423,12 @@ const IntegrationsPage: React.FC = () => {
   const getIntegration = (provider: Integration['provider']) =>
     integrations?.find(i => i.provider === provider) ?? null
 
+  const handleRetry = async () => {
+    setRetrying(true)
+    await refreshWorkspace()
+    setRetrying(false)
+  }
+
   if (authLoading) {
     return (
       <div className="space-y-4">
@@ -433,14 +440,18 @@ const IntegrationsPage: React.FC = () => {
 
   if (!workspaceId) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
+      <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
         <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
           <AlertCircle className="w-7 h-7 text-muted-foreground" />
         </div>
         <h3 className="text-base font-semibold text-foreground">Workspace não encontrado</h3>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Seu usuário não está associado a nenhum workspace. Tente fazer logout e criar uma conta novamente.
+          Seu usuário não está associado a nenhum workspace. Clique em "Tentar novamente" para recuperar automaticamente.
         </p>
+        <Button variant="outline" onClick={handleRetry} disabled={retrying}>
+          {retrying ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          Tentar novamente
+        </Button>
       </div>
     )
   }

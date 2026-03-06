@@ -51,61 +51,68 @@ const RegisterPage: React.FC = () => {
   const onSubmit = async (data: RegisterForm) => {
     setLoading(true)
     try {
+      // Pass workspace_name in metadata so the DB trigger can use it
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: data.email, password: data.password,
-        options: { data: { name: data.name }, emailRedirectTo: window.location.origin },
+        options: {
+          data: { name: data.name, workspace_name: data.workspaceName },
+          emailRedirectTo: window.location.origin,
+        },
       })
       if (authError) throw authError
       if (!authData.user) throw new Error('Erro ao criar usuário')
 
+      // The DB trigger (handle_new_user) automatically creates workspace,
+      // workspace_member, and workspace_settings. We only need to seed demo data.
+      // Wait briefly for the trigger to complete before querying workspace_id
       const userId = authData.user.id
-      const { data: ws, error: wsError } = await supabase
-        .from('workspaces').insert({ name: data.workspaceName, owner_user_id: userId }).select().single()
-      if (wsError) throw wsError
 
-      await supabase.from('workspace_members').insert({ workspace_id: ws.id, user_id: userId, role: 'admin' })
-      await supabase.from('workspace_settings').insert({
-        workspace_id: ws.id,
-        default_categories: ['Trabalho', 'Pessoal', 'Ideia', 'Reunião'],
-        default_tags: ['importante', 'urgente', 'revisão'],
-        bot_response_format: 'medio', timezone: 'America/Sao_Paulo', language: 'pt-BR',
-      })
+      // Give the trigger a moment to run, then find the workspace
+      await new Promise(r => setTimeout(r, 1500))
 
-      // Seed de dados de exemplo
-      await Promise.all([
-        supabase.from('notes').insert([
-          {
-            workspace_id: ws.id,
-            title: 'Bem-vindo ao sistema!',
-            content: '<p>Esta é uma nota de exemplo. Você pode criar notas via WhatsApp ou diretamente aqui. Use tags, categorias e projetos para organizar.</p>',
-            category: 'Pessoal',
-            tags: ['importante'],
-          },
-          {
-            workspace_id: ws.id,
-            title: 'Como usar as integrações',
-            content: '<p>Configure sua integração com WhatsApp (Evolution API) ou Telegram nas configurações de integrações. Depois adicione seu número na Whitelist para começar a receber mensagens.</p>',
-            category: 'Trabalho',
-            tags: ['revisão'],
-          },
-        ]),
-        supabase.from('tasks').insert([
-          {
-            workspace_id: ws.id,
-            title: 'Configurar integração WhatsApp ou Telegram',
-            description: 'Vá em Integrações e configure sua conexão com WhatsApp (Evolution API) ou Telegram Bot.',
-            status: 'todo',
-            priority: 'high',
-          },
-          {
-            workspace_id: ws.id,
-            title: 'Adicionar número à Whitelist',
-            description: 'Acesse Whitelist e adicione os números que podem enviar comandos ao sistema.',
-            status: 'todo',
-            priority: 'medium',
-          },
-        ]),
-      ])
+      const { data: memberRow } = await supabase
+        .from('workspace_members')
+        .select('workspace_id')
+        .eq('user_id', userId)
+        .single()
+
+      if (memberRow?.workspace_id) {
+        const wsId = memberRow.workspace_id
+        await Promise.all([
+          supabase.from('notes').insert([
+            {
+              workspace_id: wsId,
+              title: 'Bem-vindo ao sistema!',
+              content: '<p>Esta é uma nota de exemplo. Você pode criar notas via WhatsApp ou diretamente aqui. Use tags, categorias e projetos para organizar.</p>',
+              category: 'Pessoal',
+              tags: ['importante'],
+            },
+            {
+              workspace_id: wsId,
+              title: 'Como usar as integrações',
+              content: '<p>Configure sua integração com WhatsApp (Evolution API) ou Telegram nas configurações de integrações. Depois adicione seu número na Whitelist para começar a receber mensagens.</p>',
+              category: 'Trabalho',
+              tags: ['revisão'],
+            },
+          ]),
+          supabase.from('tasks').insert([
+            {
+              workspace_id: wsId,
+              title: 'Configurar integração WhatsApp ou Telegram',
+              description: 'Vá em Integrações e configure sua conexão com WhatsApp (Evolution API) ou Telegram Bot.',
+              status: 'todo',
+              priority: 'high',
+            },
+            {
+              workspace_id: wsId,
+              title: 'Adicionar número à Whitelist',
+              description: 'Acesse Whitelist e adicione os números que podem enviar comandos ao sistema.',
+              status: 'todo',
+              priority: 'medium',
+            },
+          ]),
+        ])
+      }
 
       toast.success('Conta criada com sucesso! Bem-vindo(a)!')
       navigate('/app')
