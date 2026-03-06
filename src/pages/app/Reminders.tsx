@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Bell, Plus, X, Loader2, Calendar, Phone, Clock } from 'lucide-react'
-import EmptyState from '@/components/EmptyState'
+import { EmptyState } from '@/components/EmptyState'
 
 interface Reminder {
   id: string
@@ -180,7 +180,7 @@ const RemindersPage: React.FC = () => {
           icon={Bell}
           title="Nenhum lembrete"
           description="Crie um lembrete para ser notificado no horário certo via WhatsApp ou Telegram."
-          action={<Button onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-2" />Criar Lembrete</Button>}
+          action={{ label: 'Criar Lembrete', onClick: () => setOpen(true) }}
         />
       ) : (
         <div className="space-y-3">
