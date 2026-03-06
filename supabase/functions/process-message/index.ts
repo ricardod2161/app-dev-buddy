@@ -948,6 +948,30 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     // ── 11. Send reply to user ────────────────────────────────────────────────
     await sendReply({ supabase, provider, workspace_id, sender_phone, replyText })
 
+    // ── 12. TTS audio reply — only when user sent an audio message ─────────────
+    if (message_type === 'audio') {
+      try {
+        const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+        const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
+        const ttsRes = await fetch(`${SUPABASE_URL}/functions/v1/elevenlabs-tts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ text: replyText }),
+        })
+        if (ttsRes.ok) {
+          const { base64, content_type } = await ttsRes.json()
+          await sendAudioReply({ supabase, provider, workspace_id, phone: sender_phone, base64, content_type })
+        } else {
+          console.warn('TTS request failed:', ttsRes.status, await ttsRes.text())
+        }
+      } catch (ttsErr) {
+        console.warn('TTS step failed (non-blocking):', ttsErr)
+      }
+    }
+
     return new Response(JSON.stringify({ ok: true, action: fnName }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
