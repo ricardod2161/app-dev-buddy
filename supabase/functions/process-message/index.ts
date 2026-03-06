@@ -678,21 +678,39 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         dateFrom = new Date(now); dateFrom.setDate(1); dateFrom.setHours(0, 0, 0, 0)
       }
 
-      const { data: financialNotes } = await supabase
-        .from('notes')
-        .select('title, content, created_at')
-        .eq('workspace_id', workspace_id)
-        .eq('category', 'Financeiro')
-        .gte('created_at', dateFrom.toISOString())
-        .order('created_at', { ascending: false })
+      // Dual-query strategy: tagged Financeiro + any note with monetary content
+      const [{ data: taggedNotes }, { data: untaggedNotes }] = await Promise.all([
+        supabase
+          .from('notes')
+          .select('id, title, content, created_at')
+          .eq('workspace_id', workspace_id)
+          .eq('category', 'Financeiro')
+          .gte('created_at', dateFrom.toISOString())
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('notes')
+          .select('id, title, content, created_at')
+          .eq('workspace_id', workspace_id)
+          .neq('category', 'Financeiro')
+          .gte('created_at', dateFrom.toISOString())
+          .or('title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%,title.ilike.% real%,content.ilike.% real%')
+          .order('created_at', { ascending: false }),
+      ])
 
-      if (!financialNotes?.length) {
+      // Merge, deduplicate by id
+      const seenIds = new Set<string>()
+      const allFinancialNotes: typeof taggedNotes = []
+      for (const n of [...(taggedNotes ?? []), ...(untaggedNotes ?? [])]) {
+        if (!seenIds.has(n.id)) { seenIds.add(n.id); allFinancialNotes.push(n) }
+      }
+
+      if (!allFinancialNotes.length) {
         const periodLabel = fnArgs.period === 'hoje' ? 'hoje' : fnArgs.period === 'semana' ? 'nos últimos 7 dias' : 'este mês'
         replyText = `💰 Nenhum gasto registrado ${periodLabel}.`
       } else {
         let grandTotal = 0
         const lines: string[] = []
-        for (const fn of financialNotes) {
+        for (const fn of allFinancialNotes) {
           const text = `${fn.title ?? ''} ${fn.content ?? ''}`
           const fin = extractFinancialValues(text)
           if (fin.total > 0) {
