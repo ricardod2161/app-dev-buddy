@@ -735,31 +735,20 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         dateFrom = new Date(now); dateFrom.setDate(1); dateFrom.setHours(0, 0, 0, 0)
       }
 
-      // Dual-query strategy: tagged Financeiro + any note with monetary content
-      const [{ data: taggedNotes }, { data: untaggedNotes }] = await Promise.all([
-        supabase
-          .from('notes')
-          .select('id, title, content, created_at')
-          .eq('workspace_id', workspace_id)
-          .eq('category', 'Financeiro')
-          .gte('created_at', dateFrom.toISOString())
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('notes')
-          .select('id, title, content, created_at')
-          .eq('workspace_id', workspace_id)
-          .neq('category', 'Financeiro')
-          .gte('created_at', dateFrom.toISOString())
-          .or('title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%,title.ilike.% real%,content.ilike.% real%')
-          .order('created_at', { ascending: false }),
-      ])
+      // Broad single-query strategy: fetch ALL notes in period, filter in-code
+      const { data: allPeriodNotes } = await supabase
+        .from('notes')
+        .select('id, title, content, category, created_at')
+        .eq('workspace_id', workspace_id)
+        .gte('created_at', dateFrom.toISOString())
+        .order('created_at', { ascending: false })
 
-      // Merge, deduplicate by id
-      const seenIds = new Set<string>()
-      const allFinancialNotes: typeof taggedNotes = []
-      for (const n of [...(taggedNotes ?? []), ...(untaggedNotes ?? [])]) {
-        if (!seenIds.has(n.id)) { seenIds.add(n.id); allFinancialNotes.push(n) }
-      }
+      // Filter for financial notes using both category normalization and keyword scan
+      const allFinancialNotes = (allPeriodNotes ?? []).filter(n => {
+        const isFinancialCat = normalizeFinancialCategory(n.category)
+        const text = `${n.title ?? ''} ${n.content ?? ''}`
+        return isFinancialCat || hasFinancialContent(text)
+      })
 
       if (!allFinancialNotes.length) {
         const periodLabel = fnArgs.period === 'hoje' ? 'hoje' : fnArgs.period === 'semana' ? 'nos últimos 7 dias' : 'este mês'

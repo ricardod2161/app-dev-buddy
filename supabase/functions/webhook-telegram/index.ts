@@ -83,6 +83,34 @@ Deno.serve(async (req) => {
     const senderName = [from?.first_name, from?.last_name].filter(Boolean).join(' ') || 'Telegram User'
     const messageText = (message.text as string) ?? null
 
+    // Extract media types
+    const voice = message.voice as Record<string, unknown> | undefined
+    const audioMsg = message.audio as Record<string, unknown> | undefined
+    const photos = message.photo as Record<string, unknown>[] | undefined
+    const docMsg = message.document as Record<string, unknown> | undefined
+
+    let messageType = 'text'
+    let mediaFileId: string | null = null
+    let mediaMime: string | null = null
+
+    if (voice) { messageType = 'audio'; mediaFileId = voice.file_id as string; mediaMime = 'audio/ogg' }
+    else if (audioMsg) { messageType = 'audio'; mediaFileId = audioMsg.file_id as string; mediaMime = (audioMsg.mime_type as string) ?? 'audio/mpeg' }
+    else if (photos?.length) { const p = photos[photos.length - 1]; messageType = 'image'; mediaFileId = p.file_id as string; mediaMime = 'image/jpeg' }
+    else if (docMsg) { messageType = 'document'; mediaFileId = docMsg.file_id as string; mediaMime = (docMsg.mime_type as string) ?? 'application/octet-stream' }
+
+    // Resolve Telegram file_id to download URL
+    let mediaUrl: string | null = null
+    if (mediaFileId && integration.telegram_bot_token_encrypted) {
+      try {
+        const fileRes = await fetch(`https://api.telegram.org/bot${integration.telegram_bot_token_encrypted}/getFile?file_id=${mediaFileId}`)
+        if (fileRes.ok) {
+          const fileData = await fileRes.json()
+          const filePath = fileData.result?.file_path
+          if (filePath) mediaUrl = `https://api.telegram.org/file/bot${integration.telegram_bot_token_encrypted}/${filePath}`
+        }
+      } catch (e) { console.error('Failed to resolve Telegram file:', e) }
+    }
+
     if (!chatId || !messageId) {
       await supabase.from('webhook_logs').update({ status: 'ignored', error: 'No chat or message id' }).eq('id', logId!)
       return new Response(JSON.stringify({ ok: true }), {
