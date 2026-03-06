@@ -422,7 +422,30 @@ const IntegrationsPage: React.FC = () => {
   const getIntegration = (provider: Integration['provider']) =>
     integrations?.find(i => i.provider === provider) ?? null
 
-  if (authLoading || !workspaceId || isLoading) {
+  if (authLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-12 w-72" />
+        {[...Array(2)].map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
+      </div>
+    )
+  }
+
+  if (!workspaceId) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
+        <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
+          <AlertCircle className="w-7 h-7 text-muted-foreground" />
+        </div>
+        <h3 className="text-base font-semibold text-foreground">Workspace não encontrado</h3>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          Seu usuário não está associado a nenhum workspace. Tente fazer logout e criar uma conta novamente.
+        </p>
+      </div>
+    )
+  }
+
+  if (isLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-12 w-72" />

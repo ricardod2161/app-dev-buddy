@@ -21,7 +21,10 @@ import { z } from 'zod'
 import { EmptyState } from '@/components/EmptyState'
 
 const phoneSchema = z.object({
-  phone_e164: z.string().regex(/^\+55\d{10,11}$/, 'Formato inválido. Use +55XXXXXXXXXXX'),
+  phone_e164: z.string().regex(
+    /^(\+\d{7,15}|tg:-?\d{5,15})$/,
+    'Formato inválido. Use +5511999990000 (WhatsApp) ou tg:123456789 (Telegram)'
+  ),
   label: z.string().optional(),
 })
 
@@ -173,8 +176,9 @@ const WhitelistPage: React.FC = () => {
           </DialogHeader>
           <form onSubmit={handleSubmit(d => addMutation.mutate(d))} className="space-y-4">
             <div>
-              <Label>Número (formato E.164) *</Label>
-              <Input {...register('phone_e164')} placeholder="+5511999990001" className="mt-1 font-mono" />
+              <Label>Número / ID *</Label>
+              <Input {...register('phone_e164')} placeholder="+5511999990001 ou tg:123456789" className="mt-1 font-mono" />
+              <p className="text-xs text-muted-foreground mt-1">WhatsApp: <code>+55...</code> · Telegram: <code>tg:CHAT_ID</code></p>
               {errors.phone_e164 && <p className="text-sm text-destructive mt-1">{errors.phone_e164.message}</p>}
             </div>
             <div>

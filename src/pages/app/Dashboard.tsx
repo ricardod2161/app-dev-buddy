@@ -235,11 +235,18 @@ const DashboardPage: React.FC = () => {
             {!recentNotes
               ? <Skeleton className="h-32 w-full" />
               : recentNotes.length === 0
-                ? <p className="text-sm text-muted-foreground text-center py-6">Nenhuma nota ainda</p>
+                ? (
+                  <div className="flex flex-col items-center py-6 gap-3">
+                    <p className="text-sm text-muted-foreground">Nenhuma nota ainda</p>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/app/notes')}>
+                      <FileText className="w-3.5 h-3.5 mr-1.5" />Criar primeira nota
+                    </Button>
+                  </div>
+                )
                 : (
                   <div className="space-y-3">
                     {recentNotes.map(note => (
-                      <div key={note.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                      <div key={note.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate('/app/notes')}>
                         <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                           <FileText className="w-3.5 h-3.5 text-primary" />
                         </div>
@@ -274,13 +281,20 @@ const DashboardPage: React.FC = () => {
             {!recentTasks
               ? <Skeleton className="h-32 w-full" />
               : recentTasks.length === 0
-                ? <p className="text-sm text-muted-foreground text-center py-6">Nenhuma tarefa ainda</p>
+                ? (
+                  <div className="flex flex-col items-center py-6 gap-3">
+                    <p className="text-sm text-muted-foreground">Nenhuma tarefa ainda</p>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/app/tasks')}>
+                      <CheckSquare className="w-3.5 h-3.5 mr-1.5" />Criar primeira tarefa
+                    </Button>
+                  </div>
+                )
                 : (
                   <div className="space-y-3">
                     {recentTasks.map(task => {
                       const isOverdue = task.due_at && new Date(task.due_at) < new Date() && task.status !== 'done'
                       return (
-                        <div key={task.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                        <div key={task.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => navigate('/app/tasks')}>
                           <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${priorityColors[task.priority]}`}>
                             <CheckSquare className="w-3.5 h-3.5" />
                           </div>
