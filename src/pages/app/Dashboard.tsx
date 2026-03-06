@@ -137,6 +137,25 @@ const DashboardPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  // Today's financial spend
+  const { data: todaySpend, isLoading: loadingSpend } = useQuery({
+    queryKey: ['dashboard-spend-today', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return 0
+      const [{ data: taggedNotes }, { data: otherNotes }] = await Promise.all([
+        supabase.from('notes').select('title, content')
+          .eq('workspace_id', workspaceId).eq('category', 'Financeiro').gte('created_at', today),
+        supabase.from('notes').select('title, content')
+          .eq('workspace_id', workspaceId).gte('created_at', today)
+          .neq('category', 'Financeiro')
+          .or('title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%'),
+      ])
+      const allNotes = [...(taggedNotes ?? []), ...(otherNotes ?? [])]
+      return allNotes.reduce((sum, n) => sum + parseMoneyFromText(`${n.title ?? ''} ${n.content ?? ''}`), 0)
+    },
+    enabled: !!workspaceId,
+  })
+
   // Recent activity
   const { data: recentNotes } = useQuery({
     queryKey: ['dashboard-recent-notes', workspaceId],
@@ -166,11 +185,16 @@ const DashboardPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  const spendDisplay = todaySpend != null && todaySpend > 0
+    ? todaySpend.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    : 'R$ 0,00'
+
   const metrics = [
-    { label: 'Notas Hoje', value: notesCount, icon: FileText, loading: loadingNotes, color: 'text-primary', bg: 'bg-primary/10' },
-    { label: 'Tarefas Pendentes', value: tasksCount, icon: CheckSquare, loading: loadingTasks, color: 'text-yellow-500', bg: 'bg-yellow-100 dark:bg-yellow-900/20' },
-    { label: 'Lembretes (24h)', value: remindersCount, icon: Bell, loading: loadingReminders, color: 'text-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/20' },
-    { label: 'Mensagens Hoje', value: messagesCount, icon: MessageSquare, loading: loadingMessages, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/20' },
+    { label: 'Notas Hoje', value: notesCount, icon: FileText, loading: loadingNotes, color: 'text-primary', bg: 'bg-primary/10', isText: false },
+    { label: 'Tarefas Pendentes', value: tasksCount, icon: CheckSquare, loading: loadingTasks, color: 'text-yellow-500', bg: 'bg-yellow-100 dark:bg-yellow-900/20', isText: false },
+    { label: 'Lembretes (24h)', value: remindersCount, icon: Bell, loading: loadingReminders, color: 'text-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/20', isText: false },
+    { label: 'Mensagens Hoje', value: messagesCount, icon: MessageSquare, loading: loadingMessages, color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/20', isText: false },
+    { label: 'Gastos Hoje', value: spendDisplay, icon: TrendingDown, loading: loadingSpend, color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/20', isText: true },
   ]
 
   return (
