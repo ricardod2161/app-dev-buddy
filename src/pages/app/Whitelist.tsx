@@ -184,7 +184,7 @@ const WhitelistPage: React.FC = () => {
             <div>
               <Label>Número / ID *</Label>
               <Input {...register('phone_e164')} placeholder="+5511999990001 ou tg:123456789" className="mt-1 font-mono" />
-              <p className="text-xs text-muted-foreground mt-1">WhatsApp: <code>+55...</code> · Telegram: <code>tg:CHAT_ID</code></p>
+              <p className="text-xs text-muted-foreground mt-1">WhatsApp: <code>5511999990000</code> ou <code>+5511999990000</code> · Telegram: <code>tg:CHAT_ID</code></p>
               {errors.phone_e164 && <p className="text-sm text-destructive mt-1">{errors.phone_e164.message}</p>}
             </div>
             <div>
