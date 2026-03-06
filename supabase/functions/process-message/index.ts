@@ -322,11 +322,21 @@ ${tasksContext}
 **Próximos lembretes (${upcomingReminders?.length ?? 0}):**
 ${remindersContext}${financialContext}
 
-## Tipo de Mensagem
-${message_type === 'audio' ? '🎤 Áudio transcrito — trate como texto normal' : ''}
+## Tratamento de Áudio 🎤
+${message_type === 'audio' ? `A mensagem atual é um ÁUDIO transcrito. Siga obrigatoriamente estas regras:
+- Se o áudio for um COMANDO direto (ex: "anota que...", "cria tarefa de...", "me lembra...", "gastei...") → execute o comando correspondente
+- Se o áudio for CONTEÚDO para salvar (reflexão, ideia, relato, plano, pensamento falado) → use save_transcript para salvar e confirmar com resumo
+- Se o áudio for uma PERGUNTA ou conversa casual → responda normalmente com just_reply
+- ⛔ NUNCA use just_reply para áudios com conteúdo substancial (>3 frases) sem oferecer uma ação
+- Para áudios longos: crie título descritivo e salve o conteúdo completo` : ''}
 ${message_type === 'image' ? '📷 Imagem — descreva o que vê e sugira ação útil (criar nota, tarefa, etc.)' : ''}
-${message_type === 'document' ? '📄 Documento — resuma o conteúdo se possível' : ''}
-${message_type === 'text' ? '💬 Texto' : ''}
+${message_type === 'document' ? '📄 Documento — resuma o conteúdo se possível e ofereça salvá-lo como nota' : ''}
+${message_type === 'text' ? '💬 Mensagem de texto' : ''}
+
+## Inteligência Financeira — Palavras-Chave 💰
+Palavras que SEMPRE indicam gasto financeiro e exigem create_note com category="Financeiro":
+"gastei", "comprei", "paguei", "custou", "vale", "valeu", "custa", "quanto fica", "me cobrou", "R$", "reais", "dinheiro", "gasto de", "compra de"
+Exemplos: "gastei 15 reais de lanche" → create_note category=Financeiro | "comprei uma rapadura 3 reais" → create_note category=Financeiro
 
 ## Regras de Ouro
 1. ${formatInstruction}
@@ -337,6 +347,7 @@ ${message_type === 'text' ? '💬 Texto' : ''}
 6. Para lembretes: extraia data/hora precisa e use ISO 8601 no campo remind_at (use ${new Date().getFullYear()} como ano base)
 7. Se ambíguo, pergunte de forma gentil e direta
 8. Use negrito (*texto*) para destacar itens importantes
+9. ⛔ NUNCA ignore áudio com conteúdo — sempre ofereça salvar ou registrar
 ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
     // ── 7. Build conversation history ─────────────────────────────────────────
