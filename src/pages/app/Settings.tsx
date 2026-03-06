@@ -30,6 +30,7 @@ const SettingsPage: React.FC = () => {
   const [categories, setCategories] = useState<string[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [botFormat, setBotFormat] = useState<WorkspaceSettings['bot_response_format']>('medio')
+  const [botName, setBotName] = useState('Assistente IA')
   const [timezone, setTimezone] = useState('America/Sao_Paulo')
   const [language, setLanguage] = useState('pt-BR')
   const [newCategory, setNewCategory] = useState('')
@@ -42,6 +43,7 @@ const SettingsPage: React.FC = () => {
       setCategories((settings.default_categories as string[]) ?? [])
       setTags((settings.default_tags as string[]) ?? [])
       setBotFormat(settings.bot_response_format)
+      setBotName((settings as Record<string, unknown>).bot_name as string ?? 'Assistente IA')
       setTimezone(settings.timezone ?? 'America/Sao_Paulo')
       setLanguage(settings.language ?? 'pt-BR')
     }
