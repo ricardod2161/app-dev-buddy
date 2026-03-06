@@ -602,6 +602,8 @@ export type Database = {
           id: string
           language: string | null
           timezone: string | null
+          tts_enabled: boolean
+          tts_voice_id: string
           updated_at: string | null
           workspace_id: string
         }
@@ -615,6 +617,8 @@ export type Database = {
           id?: string
           language?: string | null
           timezone?: string | null
+          tts_enabled?: boolean
+          tts_voice_id?: string
           updated_at?: string | null
           workspace_id: string
         }
@@ -628,6 +632,8 @@ export type Database = {
           id?: string
           language?: string | null
           timezone?: string | null
+          tts_enabled?: boolean
+          tts_voice_id?: string
           updated_at?: string | null
           workspace_id?: string
         }
