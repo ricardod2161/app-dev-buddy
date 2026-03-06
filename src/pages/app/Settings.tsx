@@ -107,6 +107,8 @@ const SettingsPage: React.FC = () => {
           language,
           tts_enabled: ttsEnabled,
           tts_voice_id: ttsVoiceId,
+          daily_briefing_enabled: dailyBriefingEnabled,
+          daily_briefing_time: dailyBriefingTime,
         })
         .eq('workspace_id', workspaceId)
       if (error) throw error
