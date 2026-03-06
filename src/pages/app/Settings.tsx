@@ -174,9 +174,6 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Formato do bot */}
-      <Card>
-
       {/* Respostas em Áudio (ElevenLabs TTS) */}
       <Card>
         <CardHeader>
