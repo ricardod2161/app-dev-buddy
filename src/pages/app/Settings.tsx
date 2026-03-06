@@ -30,6 +30,7 @@ const SettingsPage: React.FC = () => {
   const [categories, setCategories] = useState<string[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [botFormat, setBotFormat] = useState<WorkspaceSettings['bot_response_format']>('medio')
+  const [botName, setBotName] = useState('Assistente IA')
   const [timezone, setTimezone] = useState('America/Sao_Paulo')
   const [language, setLanguage] = useState('pt-BR')
   const [newCategory, setNewCategory] = useState('')
@@ -42,6 +43,7 @@ const SettingsPage: React.FC = () => {
       setCategories((settings.default_categories as string[]) ?? [])
       setTags((settings.default_tags as string[]) ?? [])
       setBotFormat(settings.bot_response_format)
+      setBotName(settings.bot_name ?? 'Assistente IA')
       setTimezone(settings.timezone ?? 'America/Sao_Paulo')
       setLanguage(settings.language ?? 'pt-BR')
     }
@@ -65,7 +67,7 @@ const SettingsPage: React.FC = () => {
     try {
       const { error } = await supabase
         .from('workspace_settings')
-        .update({ default_categories: categories, default_tags: tags, bot_response_format: botFormat, timezone, language })
+        .update({ default_categories: categories, default_tags: tags, bot_response_format: botFormat, bot_name: botName, timezone, language })
         .eq('workspace_id', workspaceId)
       if (error) throw error
       toast.success('Configurações salvas')
@@ -152,6 +154,23 @@ const SettingsPage: React.FC = () => {
             />
             <Button variant="outline" onClick={addTag}><Plus className="w-4 h-4" /></Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Nome do assistente */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Nome do Assistente</CardTitle>
+          <CardDescription>Como o bot se identificará nas conversas do WhatsApp/Telegram</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={botName}
+            onChange={e => setBotName(e.target.value)}
+            placeholder="Ex: Assistente IA, Copiloto, Max..."
+            maxLength={50}
+          />
+          <p className="text-xs text-muted-foreground mt-2">Este nome é usado no prompt do assistente e aparecerá nas respostas.</p>
         </CardContent>
       </Card>
 

@@ -59,11 +59,12 @@ Deno.serve(async (req) => {
     // ── 1. Fetch workspace settings ──────────────────────────────────────────
     const { data: settings } = await supabase
       .from('workspace_settings')
-      .select('bot_response_format, language, timezone')
+      .select('bot_response_format, language, timezone, bot_name')
       .eq('workspace_id', workspace_id)
       .maybeSingle()
 
     const responseFormat = settings?.bot_response_format ?? 'medio'
+    const botName = (settings as Record<string, unknown>)?.bot_name as string ?? 'Assistente IA'
     const formatInstruction =
       responseFormat === 'curto'
         ? 'Responda de forma muito curta e direta (1-2 linhas).'
@@ -185,7 +186,7 @@ Deno.serve(async (req) => {
 
     // ── 7. Build system prompt ───────────────────────────────────────────────
     const systemPrompt = `Você é um assistente pessoal inteligente e profissional integrado ao WhatsApp/Telegram do usuário.
-Seu nome é **Assistente IA** e você ajuda a organizar a vida do usuário de forma eficiente.
+Seu nome é **${botName}** e você ajuda a organizar a vida do usuário de forma eficiente.
 
 ## Suas Capacidades
 - Criar notas e anotações (palavras-chave: "anote", "salva", "guarda", "registra", "nota")
