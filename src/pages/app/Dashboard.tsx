@@ -24,6 +24,7 @@ const priorityColors: Record<string, string> = {
 
 const DashboardPage: React.FC = () => {
   const { workspaceId } = useAuth()
+  const navigate = useNavigate()
 
   const today = startOfDay(new Date()).toISOString()
   const tomorrow = startOfDay(subDays(new Date(), -1)).toISOString()
