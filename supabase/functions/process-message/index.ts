@@ -199,6 +199,27 @@ Deno.serve(async (req) => {
     let effectiveText = message_text
     let mediaInlineData: { mime_type: string; data: string } | null = null
 
+    // Normalize MIME types — Evolution API sometimes returns field names instead of real MIME types
+    function normalizeMime(rawMime: string | null | undefined, msgType: string): string {
+      if (!rawMime) {
+        if (msgType === 'audio') return 'audio/ogg'
+        if (msgType === 'image') return 'image/jpeg'
+        if (msgType === 'video') return 'video/mp4'
+        return 'application/octet-stream'
+      }
+      const lower = rawMime.toLowerCase()
+      // Evolution returns field names like "audioMessage", "imageMessage", etc.
+      if (lower === 'audiomessage' || lower === 'audio' || lower.includes('ogg') || lower.includes('opus')) return 'audio/ogg'
+      if (lower === 'imagemessage' || lower === 'image') return 'image/jpeg'
+      if (lower === 'videomessage' || lower === 'video') return 'video/mp4'
+      if (lower === 'documentmessage' || lower === 'document') return 'application/octet-stream'
+      // If it already looks like a proper MIME type (contains '/'), keep it
+      if (rawMime.includes('/')) return rawMime
+      return 'application/octet-stream'
+    }
+
+    const resolvedMime = normalizeMime(media_mime, message_type)
+
     if ((message_type === 'audio' || message_type === 'image' || message_type === 'document') && !media_base64 && media_url) {
       try {
         const mediaRes = await fetch(media_url)
@@ -208,7 +229,7 @@ Deno.serve(async (req) => {
           let binary = ''
           for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
           mediaInlineData = {
-            mime_type: media_mime ?? (message_type === 'audio' ? 'audio/ogg' : message_type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+            mime_type: resolvedMime,
             data: btoa(binary),
           }
         }
@@ -217,7 +238,7 @@ Deno.serve(async (req) => {
       }
     } else if (media_base64) {
       mediaInlineData = {
-        mime_type: media_mime ?? (message_type === 'audio' ? 'audio/ogg' : 'image/jpeg'),
+        mime_type: resolvedMime,
         data: media_base64,
       }
     }
