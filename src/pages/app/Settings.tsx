@@ -12,7 +12,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { X, Plus, Save, Loader2, Search, Bot, Sparkles } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2 } from 'lucide-react'
+
+const TTS_VOICES = [
+  { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian', gender: 'Masculina' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', label: 'George', gender: 'Masculina' },
+  { id: 'IKne3meq5aSn9XLyUdCD', label: 'Charlie', gender: 'Masculina' },
+  { id: 'TX3LPaxmHKxFdv7VOQHJ', label: 'Liam', gender: 'Masculina' },
+  { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel', gender: 'Masculina' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Sarah', gender: 'Feminina' },
+  { id: 'FGY2WhTYpPnrIDTdsKH5', label: 'Laura', gender: 'Feminina' },
+  { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice', gender: 'Feminina' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', label: 'Matilda', gender: 'Feminina' },
+  { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica', gender: 'Feminina' },
+]
 
 const SettingsPage: React.FC = () => {
   const { workspaceId } = useAuth()
