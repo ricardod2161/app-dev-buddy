@@ -11,10 +11,31 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { FileText, CheckSquare, Bell, MessageSquare, Clock } from 'lucide-react'
+import { FileText, CheckSquare, Bell, MessageSquare, Clock, TrendingDown } from 'lucide-react'
 import { format, subDays, startOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { stripHtml, truncate } from '@/lib/utils'
+
+function parseMoneyFromText(text: string): number {
+  const patterns = [
+    /R\$\s*([\d]+(?:[.,]\d{1,2})?)/gi,
+    /([\d]+(?:[.,]\d{1,2})?)\s*(?:reais|real)/gi,
+  ]
+  let total = 0
+  const seen = new Set<string>()
+  for (const pattern of patterns) {
+    let m: RegExpExecArray | null
+    while ((m = pattern.exec(text)) !== null) {
+      const key = m[1]
+      if (!seen.has(key)) {
+        seen.add(key)
+        const v = parseFloat(m[1].replace(',', '.'))
+        if (!isNaN(v) && v > 0) total += v
+      }
+    }
+  }
+  return total
+}
 
 const priorityColors: Record<string, string> = {
   high: 'bg-destructive/10 text-destructive border-destructive/20',
