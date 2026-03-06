@@ -226,6 +226,46 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Briefing Matinal */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sunrise className="w-4 h-4 text-primary" />
+            Briefing Matinal
+          </CardTitle>
+          <CardDescription>Todo dia de manhã o assistente te manda um áudio caloroso perguntando o que você quer fazer e listando suas pendências</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Ativar briefing diário</p>
+              <p className="text-xs text-muted-foreground">O bot te contata proativamente toda manhã no horário escolhido</p>
+            </div>
+            <Switch checked={dailyBriefingEnabled} onCheckedChange={setDailyBriefingEnabled} />
+          </div>
+          {dailyBriefingEnabled && (
+            <div className="space-y-2">
+              <Label>Horário do briefing</Label>
+              <Select value={dailyBriefingTime} onValueChange={setDailyBriefingTime}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BRIEFING_TIMES.map(t => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {ttsEnabled
+                  ? 'O briefing será enviado como áudio de voz (ElevenLabs) + texto'
+                  : 'Ative as "Respostas em Áudio" acima para receber o briefing também como voz'}
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Formato do bot */}
       <Card>
         <CardHeader>
