@@ -1101,8 +1101,8 @@ async function sendAudioReply({
     }
 
     if (integration.provider === 'EVOLUTION') {
-      // Evolution API: send as audio media with base64 data URI
-      await fetch(`${integration.api_url}/message/sendMedia/${integration.instance_id}`, {
+      // Evolution API: send as WhatsApp audio (PTT voice note) via sendWhatsAppAudio
+      const audioRes = await fetch(`${integration.api_url}/message/sendWhatsAppAudio/${integration.instance_id}`, {
         method: 'POST',
         headers: {
           apikey: (integration.api_key_encrypted as string) ?? '',
@@ -1110,11 +1110,29 @@ async function sendAudioReply({
         },
         body: JSON.stringify({
           number: phone,
-          mediatype: 'audio',
-          media: `data:${content_type};base64,${base64}`,
-          mimetype: content_type,
+          audio: base64,
+          encoding: true,
         }),
       })
+      if (!audioRes.ok) {
+        const errText = await audioRes.text()
+        console.warn(`sendWhatsAppAudio failed (${audioRes.status}):`, errText.slice(0, 300))
+        // Fallback: try sendMedia
+        await fetch(`${integration.api_url}/message/sendMedia/${integration.instance_id}`, {
+          method: 'POST',
+          headers: {
+            apikey: (integration.api_key_encrypted as string) ?? '',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            number: phone,
+            mediatype: 'audio',
+            media: `data:${content_type};base64,${base64}`,
+            mimetype: content_type,
+            fileName: 'audio.mp3',
+          }),
+        })
+      }
     } else if (integration.provider === 'TELEGRAM') {
       // Telegram: sendVoice via multipart FormData with binary blob
       const chatId = phone.startsWith('tg:') ? phone.slice(3) : phone
