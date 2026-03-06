@@ -56,6 +56,8 @@ const SettingsPage: React.FC = () => {
   const [language, setLanguage] = useState('pt-BR')
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const [ttsVoiceId, setTtsVoiceId] = useState('nPczCjzI2devNBz1zQrb')
+  const [dailyBriefingEnabled, setDailyBriefingEnabled] = useState(false)
+  const [dailyBriefingTime, setDailyBriefingTime] = useState('07:00')
   const [newCategory, setNewCategory] = useState('')
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
@@ -72,6 +74,8 @@ const SettingsPage: React.FC = () => {
       setLanguage(settings.language ?? 'pt-BR')
       setTtsEnabled(settings.tts_enabled ?? false)
       setTtsVoiceId(settings.tts_voice_id ?? 'nPczCjzI2devNBz1zQrb')
+      setDailyBriefingEnabled(settings.daily_briefing_enabled ?? false)
+      setDailyBriefingTime(settings.daily_briefing_time ?? '07:00')
     }
   }, [settings])
 
