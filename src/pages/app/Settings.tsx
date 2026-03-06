@@ -43,7 +43,7 @@ const SettingsPage: React.FC = () => {
       setCategories((settings.default_categories as string[]) ?? [])
       setTags((settings.default_tags as string[]) ?? [])
       setBotFormat(settings.bot_response_format)
-      setBotName((settings as Record<string, unknown>).bot_name as string ?? 'Assistente IA')
+      setBotName(settings.bot_name ?? 'Assistente IA')
       setTimezone(settings.timezone ?? 'America/Sao_Paulo')
       setLanguage(settings.language ?? 'pt-BR')
     }

@@ -151,6 +151,7 @@ export interface WorkspaceSettings {
   default_categories: string[]
   default_tags: string[]
   bot_response_format: 'curto' | 'medio' | 'detalhado'
+  bot_name: string
   timezone: string
   language: string
   created_at: string
