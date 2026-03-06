@@ -160,13 +160,14 @@ Deno.serve(async (req) => {
       conversationId = newConv!.id
     }
 
-    // Insert message
+    // Insert message (with correct type and media_url)
     await supabase.from('messages').insert({
       workspace_id: workspaceId,
       conversation_id: conversationId,
       direction: 'IN',
-      type: 'text',
+      type: messageType,
       body_text: messageText,
+      media_url: mediaUrl,
       provider_message_id: `tg_${messageId}`,
       timestamp: new Date().toISOString(),
     })
@@ -180,10 +181,7 @@ Deno.serve(async (req) => {
     // Update log
     await supabase.from('webhook_logs').update({ status: 'ok' }).eq('id', logId!)
 
-    // Insert message (with type + mediaUrl)
-    // (message already inserted above, update type if needed)
-
-    // Fire-and-forget: AI processing
+    // Fire-and-forget: AI processing (pass message_type + media_url so process-message can transcribe audio)
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     fetch(`${supabaseUrl}/functions/v1/process-message`, {
       method: 'POST',
@@ -194,6 +192,9 @@ Deno.serve(async (req) => {
         message_text: messageText,
         sender_phone: telegramIdentifier,
         provider: 'TELEGRAM',
+        message_type: messageType,
+        media_url: mediaUrl,
+        media_mime: mediaMime,
       }),
     }).catch((e) => console.error('process-message fire-and-forget error:', e))
 
