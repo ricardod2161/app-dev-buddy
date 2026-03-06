@@ -21,10 +21,16 @@ import { z } from 'zod'
 import { EmptyState } from '@/components/EmptyState'
 
 const phoneSchema = z.object({
-  phone_e164: z.string().regex(
-    /^(\+\d{7,15}|tg:-?\d{5,15})$/,
-    'Formato inválido. Use +5511999990000 (WhatsApp) ou tg:123456789 (Telegram)'
-  ),
+  phone_e164: z.string()
+    .transform(v => {
+      // Auto-add + prefix for numeric-only WhatsApp numbers
+      if (/^\d{7,15}$/.test(v)) return `+${v}`
+      return v
+    })
+    .pipe(z.string().regex(
+      /^(\+\d{7,15}|tg:-?\d{5,15})$/,
+      'Formato inválido. Use +5511999990000 ou apenas 5511999990000 (WhatsApp) · tg:123456789 (Telegram)'
+    )),
   label: z.string().optional(),
 })
 
