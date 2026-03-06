@@ -96,6 +96,8 @@ const SettingsPage: React.FC = () => {
           bot_personality: botPersonality.trim() || null,
           timezone,
           language,
+          tts_enabled: ttsEnabled,
+          tts_voice_id: ttsVoiceId,
         })
         .eq('workspace_id', workspaceId)
       if (error) throw error
