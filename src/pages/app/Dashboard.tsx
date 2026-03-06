@@ -200,8 +200,8 @@ const DashboardPage: React.FC = () => {
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
-        {metrics.map(({ label, value, icon: Icon, loading, color, bg }) => (
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
+        {metrics.map(({ label, value, icon: Icon, loading, color, bg, isText }) => (
           <Card key={label} className="hover:shadow-md transition-shadow">
             <CardContent className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-3">
@@ -212,7 +212,9 @@ const DashboardPage: React.FC = () => {
               </div>
               {loading
                 ? <Skeleton className="h-8 w-16" />
-                : <p className="text-2xl sm:text-3xl font-bold text-foreground">{value ?? 0}</p>
+                : isText
+                  ? <p className="text-lg sm:text-xl font-bold text-foreground">{value}</p>
+                  : <p className="text-2xl sm:text-3xl font-bold text-foreground">{value ?? 0}</p>
               }
             </CardContent>
           </Card>
