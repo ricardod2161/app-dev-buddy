@@ -13,7 +13,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2 } from 'lucide-react'
+import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2, Sunrise } from 'lucide-react'
+
+const BRIEFING_TIMES = [
+  '05:00', '05:30', '06:00', '06:30', '07:00', '07:30',
+  '08:00', '08:30', '09:00', '09:30', '10:00',
+]
 
 const TTS_VOICES = [
   { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian', gender: 'Masculina' },
