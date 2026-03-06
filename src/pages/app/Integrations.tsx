@@ -173,11 +173,15 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
       }
       setWebhookLoading(true)
       try {
+        // Evolution API v2 requires the config nested under "webhook" key
         const webhookBody = {
-          url: webhookWhatsappUrl,
-          webhook_by_events: false,
-          webhook_base64: false,
-          events: ['MESSAGES_UPSERT', 'messages.upsert'],
+          webhook: {
+            url: webhookWhatsappUrl,
+            webhook_by_events: false,
+            webhook_base64: false,
+            enabled: true,
+            events: ['MESSAGES_UPSERT'],
+          }
         }
         const res = await fetch(`${effectiveApiUrl}/webhook/set/${effectiveInstance}`, {
           method: 'POST',
