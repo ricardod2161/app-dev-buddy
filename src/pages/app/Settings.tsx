@@ -185,12 +185,12 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Respostas em Áudio (ElevenLabs TTS) */}
+      {/* Respostas em Áudio */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Volume2 className="w-4 h-4 text-primary" />
-            Respostas em Áudio (ElevenLabs)
+            Respostas em Áudio
           </CardTitle>
           <CardDescription>Quando ativado, o bot responde com áudio de voz quando você enviar uma mensagem de áudio</CardDescription>
         </CardHeader>
@@ -198,7 +198,7 @@ const SettingsPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">Ativar respostas em áudio</p>
-              <p className="text-xs text-muted-foreground">O bot só responde com áudio quando recebe um áudio</p>
+              <p className="text-xs text-muted-foreground">O bot responde com áudio quando recebe um áudio ou quando você pedir</p>
             </div>
             <Switch checked={ttsEnabled} onCheckedChange={setTtsEnabled} />
           </div>
@@ -210,17 +210,17 @@ const SettingsPage: React.FC = () => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">🎙 Masculinas</div>
-                  {TTS_VOICES.filter(v => v.gender === 'Masculina').map(voice => (
+                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">🎙 Femininas</div>
+                  {TTS_VOICES.filter(v => v.gender === 'Feminina').map(voice => (
                     <SelectItem key={voice.id} value={voice.id}>{voice.label}</SelectItem>
                   ))}
-                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground mt-1">🎙 Femininas</div>
-                  {TTS_VOICES.filter(v => v.gender === 'Feminina').map(voice => (
+                  <div className="px-2 py-1 text-xs font-semibold text-muted-foreground mt-1">🎙 Masculinas</div>
+                  {TTS_VOICES.filter(v => v.gender === 'Masculina').map(voice => (
                     <SelectItem key={voice.id} value={voice.id}>{voice.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Vozes do ElevenLabs — plano gratuito inclui 10.000 caracteres/mês</p>
+              <p className="text-xs text-muted-foreground">Síntese de voz de alta qualidade — processado pelo gateway de IA</p>
             </div>
           )}
         </CardContent>
