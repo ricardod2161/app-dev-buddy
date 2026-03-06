@@ -145,6 +145,17 @@ export interface WebhookLog {
   created_at: string
 }
 
+export interface Contact {
+  id: string
+  workspace_id: string
+  phone_e164: string
+  name: string
+  notes: string | null
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
 export interface WorkspaceSettings {
   id: string
   workspace_id: string

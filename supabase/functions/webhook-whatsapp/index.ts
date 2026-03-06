@@ -254,6 +254,15 @@ Deno.serve(async (req) => {
       .eq('contact_phone', phoneE164)
       .maybeSingle()
 
+    // Look up contact name from contacts table
+    const { data: contactRow } = await supabase
+      .from('contacts')
+      .select('name')
+      .eq('workspace_id', workspaceId)
+      .eq('phone_e164', phoneE164)
+      .maybeSingle()
+    const contactName = contactRow?.name ?? null
+
     let conversationId: string
     if (existingConv) {
       conversationId = existingConv.id
