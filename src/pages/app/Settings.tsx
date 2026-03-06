@@ -49,6 +49,8 @@ const SettingsPage: React.FC = () => {
   const [botPersonality, setBotPersonality] = useState('')
   const [timezone, setTimezone] = useState('America/Sao_Paulo')
   const [language, setLanguage] = useState('pt-BR')
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const [ttsVoiceId, setTtsVoiceId] = useState('nPczCjzI2devNBz1zQrb')
   const [newCategory, setNewCategory] = useState('')
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
