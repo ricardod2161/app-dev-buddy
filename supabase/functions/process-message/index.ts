@@ -90,6 +90,55 @@ Deno.serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY not configured')
 
+    // ── /ajuda command — intercept before AI call ────────────────────────────
+    const textTrimmed = message_text?.trim() ?? ''
+    const isAjudaCommand = /^\/(ajuda|help|comandos|start|menu)$/i.test(textTrimmed) || /^(ajuda|help|comandos|o que você (faz|sabe|pode)|como usar)/i.test(textTrimmed)
+    if (isAjudaCommand && message_type === 'text') {
+      const SUPABASE_URL2 = Deno.env.get('SUPABASE_URL')!
+      const ANON_KEY2 = Deno.env.get('SUPABASE_ANON_KEY')!
+      const { data: ws_settings } = await supabase.from('workspace_settings').select('bot_name').eq('workspace_id', workspace_id).maybeSingle()
+      const botN = (ws_settings as Record<string,unknown>)?.bot_name as string ?? 'Assistente IA'
+      const helpText = `🤖 *${botN} — Lista de Comandos*\n\n` +
+        `📝 *NOTAS*\n` +
+        `• "Anota que..." → salva uma nota\n` +
+        `• "Minhas notas" / "Lista notas" → ver notas recentes\n` +
+        `• "Busca [palavra]" → encontrar notas por texto\n` +
+        `• "Apaga a nota [título]" → remover nota\n\n` +
+        `✅ *TAREFAS*\n` +
+        `• "Cria tarefa: [título]" → nova tarefa\n` +
+        `• "Minhas tarefas" / "Lista tarefas" → tarefas em aberto\n` +
+        `• "Concluí [tarefa]" / "Finalizei [tarefa]" → marcar como feita\n\n` +
+        `⏰ *LEMBRETES*\n` +
+        `• "Me lembra de [X] às [hora]" → criar lembrete\n` +
+        `• "Meus lembretes" → ver próximos lembretes\n` +
+        `• "Cancela lembrete [título]" → remover lembrete\n\n` +
+        `💰 *FINANÇAS*\n` +
+        `• "Gastei R$X de [item]" → registra gasto\n` +
+        `• "Gastos de hoje" / "do mês" → relatório financeiro\n` +
+        `• "Resumo semanal" → resumo da semana\n\n` +
+        `🎤 *ÁUDIO*\n` +
+        `• Envie um áudio → o bot transcreve, interpreta e age\n` +
+        `• "Responde em áudio" / "Manda áudio" → resposta em voz\n\n` +
+        `📊 *RELATÓRIOS*\n` +
+        `• "Resumo da semana" → atividades + gastos + tarefas\n` +
+        `• "Gastos do mês" → total financeiro detalhado\n\n` +
+        `💡 _Você pode falar naturalmente! Não precisa usar comandos exatos._`
+
+      // Save to messages & send
+      await supabase.from('messages').insert({
+        workspace_id, conversation_id, direction: 'OUT', type: 'text',
+        body_text: helpText, timestamp: new Date().toISOString(),
+      })
+      await fetch(`${SUPABASE_URL2}/functions/v1/send-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY2}`, 'apikey': ANON_KEY2 },
+        body: JSON.stringify({ workspace_id, phone: sender_phone, text: helpText }),
+      })
+      return new Response(JSON.stringify({ ok: true, action: 'ajuda' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     // ── 1. Fetch workspace settings + contact name ───────────────────────────
     const [{ data: settings }, { data: contactRow }] = await Promise.all([
       supabase
