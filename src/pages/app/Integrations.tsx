@@ -33,7 +33,6 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
   const [webhookLoading, setWebhookLoading] = useState(false)
   const [simulateOpen, setSimulateOpen] = useState(false)
   const [simulateLoading, setSimulateLoading] = useState(false)
-  const effectiveInstance = integration?.instance_id ?? 'secretaria'
   const [simulatePayload, setSimulatePayload] = useState(
     provider === 'TELEGRAM'
       ? JSON.stringify({ update_id: 123456789, message: { message_id: 1, from: { id: 111111111, first_name: 'Teste', username: 'testuser' }, chat: { id: 111111111, type: 'private' }, text: 'anota: Teste de webhook simulado' } }, null, 2)
