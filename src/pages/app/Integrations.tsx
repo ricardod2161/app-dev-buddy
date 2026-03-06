@@ -51,6 +51,7 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
   const webhookWhatsappUrl = `https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/webhook-whatsapp`
   const webhookTelegramUrl = `https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/webhook-telegram`
   const webhookUrl = provider === 'TELEGRAM' ? webhookTelegramUrl : webhookWhatsappUrl
+  const [setupOpen, setSetupOpen] = useState(false)
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => toast.success('Copiado!'))
