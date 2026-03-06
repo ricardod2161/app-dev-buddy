@@ -365,9 +365,14 @@ Deno.serve(async (req) => {
 
     // Fire-and-forget: AI processing
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
     fetch(`${supabaseUrl}/functions/v1/process-message`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'apikey': supabaseAnonKey,
+      },
       body: JSON.stringify({
         workspace_id: workspaceId,
         conversation_id: conversationId,
