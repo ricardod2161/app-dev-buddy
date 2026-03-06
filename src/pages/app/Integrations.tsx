@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+
 import { Textarea } from '@/components/ui/textarea'
 import { CheckCircle, XCircle, Loader2, Send, Zap, BookOpen, Copy, ExternalLink, AlertCircle, Info, RefreshCw } from 'lucide-react'
 
@@ -292,7 +292,7 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status:</span>
           {isActive
-            ? <Badge className="bg-green-500/10 text-green-600 border-green-500/20"><CheckCircle className="w-3 h-3 mr-1" />Ativo</Badge>
+            ? <Badge className="bg-primary/10 text-primary border-primary/20"><CheckCircle className="w-3 h-3 mr-1" />Ativo</Badge>
             : <Badge variant="outline" className="text-muted-foreground"><XCircle className="w-3 h-3 mr-1" />Inativo</Badge>
           }
           <Button variant="outline" size="sm" onClick={() => setIsActive(v => !v)}>
