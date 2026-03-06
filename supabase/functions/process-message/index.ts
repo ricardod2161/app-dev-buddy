@@ -563,13 +563,48 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             type: 'function',
             function: {
               name: 'just_reply',
-              description: 'Responde ao usuário sem nenhuma ação de criação/edição. Use para conversas, perguntas gerais, ou quando nenhuma outra ferramenta se aplica.',
+              description: 'Responde ao usuário sem nenhuma ação de criação/edição. Use APENAS para: (1) perguntas e conversas casuais, (2) áudios que são exclusivamente perguntas, (3) situações onde nenhuma outra ferramenta se aplica. ⛔ NÃO use para áudios com conteúdo substancial.',
               parameters: {
                 type: 'object',
                 properties: {
                   message: { type: 'string', description: 'Resposta para o usuário' },
                 },
                 required: ['message'],
+                additionalProperties: false,
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'save_transcript',
+              description: 'Salva a transcrição/conteúdo de um áudio como nota estruturada. Use quando o áudio contém conteúdo substancial (reflexão, ideia, relato, plano) que NÃO é um comando direto. Preferir este tool em vez de just_reply para áudios com mais de 3 frases.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', description: 'Título descritivo e conciso resumindo o tema do áudio' },
+                  transcript: { type: 'string', description: 'Transcrição completa ou conteúdo fiel do áudio' },
+                  summary: { type: 'string', description: 'Resumo de 2-3 frases destacando os pontos principais' },
+                  category: { type: 'string', description: 'Categoria mais adequada: Pessoal, Ideia, Trabalho, Reunião, etc.' },
+                  reply_message: { type: 'string', description: 'Confirmação amigável com resumo do que foi salvo, perguntando se quer criar tarefas/lembretes relacionados' },
+                },
+                required: ['title', 'transcript', 'summary', 'reply_message'],
+                additionalProperties: false,
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'delete_note',
+              description: 'Remove/deleta uma nota existente pelo título. Use quando usuário pede para apagar, deletar ou remover uma nota.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  note_title: { type: 'string', description: 'Título ou parte do título da nota a ser removida' },
+                  reply_message: { type: 'string', description: 'Confirmação amigável após deletar' },
+                },
+                required: ['note_title', 'reply_message'],
                 additionalProperties: false,
               },
             },
