@@ -67,7 +67,7 @@ const SettingsPage: React.FC = () => {
     try {
       const { error } = await supabase
         .from('workspace_settings')
-        .update({ default_categories: categories, default_tags: tags, bot_response_format: botFormat, timezone, language })
+        .update({ default_categories: categories, default_tags: tags, bot_response_format: botFormat, bot_name: botName, timezone, language })
         .eq('workspace_id', workspaceId)
       if (error) throw error
       toast.success('Configurações salvas')
