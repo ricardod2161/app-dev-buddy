@@ -166,22 +166,27 @@ Deno.serve(async (req) => {
         .gte('remind_at', new Date().toISOString())
         .order('remind_at', { ascending: true })
         .limit(5),
-      // today's financial notes for total spend context
+      // today's financial notes (dual-query for context total)
       supabase
         .from('notes')
         .select('title, content')
         .eq('workspace_id', workspace_id)
-        .eq('category', 'Financeiro')
+        .or(`category.eq.Financeiro,title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%`)
         .gte('created_at', todayStart.toISOString()),
     ])
 
     const history = (historyRows ?? []).reverse()
 
-    // Compute today's spend total from financial notes
+    // Compute today's spend total from financial notes (deduplicated by title)
     let todaySpendTotal = 0
+    const seenTitlesForSpend = new Set<string>()
     for (const fn of todayFinancialNotes ?? []) {
-      const text = `${fn.title ?? ''} ${fn.content ?? ''}`
-      todaySpendTotal += extractFinancialValues(text).total
+      const key = fn.title ?? ''
+      if (!seenTitlesForSpend.has(key)) {
+        seenTitlesForSpend.add(key)
+        const text = `${fn.title ?? ''} ${fn.content ?? ''}`
+        todaySpendTotal += extractFinancialValues(text).total
+      }
     }
 
     // ── 3. Handle multimodal content ─────────────────────────────────────────
