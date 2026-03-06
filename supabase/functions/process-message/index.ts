@@ -1064,3 +1064,71 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
     })
   }
 }
+
+// ── Audio reply via TTS ──────────────────────────────────────────────────────
+async function sendAudioReply({
+  supabase,
+  provider,
+  workspace_id,
+  phone,
+  base64,
+  content_type,
+}: {
+  supabase: ReturnType<typeof createClient>
+  provider: string
+  workspace_id: string
+  phone: string
+  base64: string
+  content_type: string
+}) {
+  try {
+    const { data: integration } = await supabase
+      .from('integrations')
+      .select('*')
+      .eq('workspace_id', workspace_id)
+      .eq('provider', provider)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (!integration) {
+      console.warn('sendAudioReply: no active integration found')
+      return
+    }
+
+    if (integration.provider === 'EVOLUTION') {
+      // Evolution API: send as audio media with base64 data URI
+      await fetch(`${integration.api_url}/message/sendMedia/${integration.instance_id}`, {
+        method: 'POST',
+        headers: {
+          apikey: (integration.api_key_encrypted as string) ?? '',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          number: phone,
+          mediatype: 'audio',
+          media: `data:${content_type};base64,${base64}`,
+          mimetype: content_type,
+        }),
+      })
+    } else if (integration.provider === 'TELEGRAM') {
+      // Telegram: sendVoice via multipart FormData with binary blob
+      const chatId = phone.startsWith('tg:') ? phone.slice(3) : phone
+      const binaryStr = atob(base64)
+      const bytes = new Uint8Array(binaryStr.length)
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
+
+      const form = new FormData()
+      form.append('chat_id', chatId)
+      form.append('voice', blob, 'voice.mp3')
+
+      await fetch(`https://api.telegram.org/bot${integration.telegram_bot_token_encrypted}/sendVoice`, {
+        method: 'POST',
+        body: form,
+      })
+    }
+    // CLOUD (Meta) does not support base64 audio without a public URL — skip silently
+  } catch (err) {
+    console.warn('sendAudioReply error (non-blocking):', err)
+  }
+}
