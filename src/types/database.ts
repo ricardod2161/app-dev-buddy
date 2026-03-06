@@ -168,6 +168,9 @@ export interface WorkspaceSettings {
   language: string
   tts_enabled: boolean
   tts_voice_id: string
+  daily_briefing_enabled: boolean
+  daily_briefing_time: string
+  daily_briefing_last_sent: string | null
   created_at: string
   updated_at: string
 }
