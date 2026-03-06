@@ -13,7 +13,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2 } from 'lucide-react'
+import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2, Sunrise } from 'lucide-react'
+
+const BRIEFING_TIMES = [
+  '05:00', '05:30', '06:00', '06:30', '07:00', '07:30',
+  '08:00', '08:30', '09:00', '09:30', '10:00',
+]
 
 const TTS_VOICES = [
   { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian', gender: 'Masculina' },
@@ -51,6 +56,8 @@ const SettingsPage: React.FC = () => {
   const [language, setLanguage] = useState('pt-BR')
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const [ttsVoiceId, setTtsVoiceId] = useState('nPczCjzI2devNBz1zQrb')
+  const [dailyBriefingEnabled, setDailyBriefingEnabled] = useState(false)
+  const [dailyBriefingTime, setDailyBriefingTime] = useState('07:00')
   const [newCategory, setNewCategory] = useState('')
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
@@ -67,6 +74,8 @@ const SettingsPage: React.FC = () => {
       setLanguage(settings.language ?? 'pt-BR')
       setTtsEnabled(settings.tts_enabled ?? false)
       setTtsVoiceId(settings.tts_voice_id ?? 'nPczCjzI2devNBz1zQrb')
+      setDailyBriefingEnabled(settings.daily_briefing_enabled ?? false)
+      setDailyBriefingTime(settings.daily_briefing_time ?? '07:00')
     }
   }, [settings])
 
@@ -98,6 +107,8 @@ const SettingsPage: React.FC = () => {
           language,
           tts_enabled: ttsEnabled,
           tts_voice_id: ttsVoiceId,
+          daily_briefing_enabled: dailyBriefingEnabled,
+          daily_briefing_time: dailyBriefingTime,
         })
         .eq('workspace_id', workspaceId)
       if (error) throw error
@@ -210,6 +221,46 @@ const SettingsPage: React.FC = () => {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">Vozes do ElevenLabs — plano gratuito inclui 10.000 caracteres/mês</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Briefing Matinal */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sunrise className="w-4 h-4 text-primary" />
+            Briefing Matinal
+          </CardTitle>
+          <CardDescription>Todo dia de manhã o assistente te manda um áudio caloroso perguntando o que você quer fazer e listando suas pendências</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Ativar briefing diário</p>
+              <p className="text-xs text-muted-foreground">O bot te contata proativamente toda manhã no horário escolhido</p>
+            </div>
+            <Switch checked={dailyBriefingEnabled} onCheckedChange={setDailyBriefingEnabled} />
+          </div>
+          {dailyBriefingEnabled && (
+            <div className="space-y-2">
+              <Label>Horário do briefing</Label>
+              <Select value={dailyBriefingTime} onValueChange={setDailyBriefingTime}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BRIEFING_TIMES.map(t => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {ttsEnabled
+                  ? 'O briefing será enviado como áudio de voz (ElevenLabs) + texto'
+                  : 'Ative as "Respostas em Áudio" acima para receber o briefing também como voz'}
+              </p>
             </div>
           )}
         </CardContent>
