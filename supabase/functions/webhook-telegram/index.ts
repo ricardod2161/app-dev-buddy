@@ -180,6 +180,9 @@ Deno.serve(async (req) => {
     // Update log
     await supabase.from('webhook_logs').update({ status: 'ok' }).eq('id', logId!)
 
+    // Insert message (with type + mediaUrl)
+    // (message already inserted above, update type if needed)
+
     // Fire-and-forget: AI processing
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     fetch(`${supabaseUrl}/functions/v1/process-message`, {

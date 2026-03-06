@@ -848,6 +848,31 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       } else {
         replyText = `❌ Não encontrei nenhum lembrete com o nome "${fnArgs.reminder_title}".`
       }
+    } else if (fnName === 'save_transcript') {
+      const { error: transcriptErr } = await supabase.from('notes').insert({
+        workspace_id,
+        title: fnArgs.title,
+        content: `${fnArgs.summary}\n\n---\n\n${fnArgs.transcript}`,
+        category: fnArgs.category ?? 'Pessoal',
+        tags: ['áudio', 'transcrição'],
+        source_message_id: null,
+      })
+      if (transcriptErr) console.error('Failed to save transcript:', transcriptErr)
+      replyText = fnArgs.reply_message ?? `✅ Áudio salvo como nota: "${fnArgs.title}"`
+    } else if (fnName === 'delete_note') {
+      const { data: matchingNotes } = await supabase
+        .from('notes')
+        .select('id, title')
+        .eq('workspace_id', workspace_id)
+        .ilike('title', `%${fnArgs.note_title}%`)
+        .limit(1)
+      if (matchingNotes?.length) {
+        const { error: delErr } = await supabase.from('notes').delete().eq('id', matchingNotes[0].id)
+        if (delErr) console.error('Failed to delete note:', delErr)
+        replyText = fnArgs.reply_message ?? `🗑️ Nota "${matchingNotes[0].title}" removida.`
+      } else {
+        replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}".`
+      }
     } else {
       // just_reply
       replyText = fnArgs.message ?? 'Olá! Como posso ajudar? 😊'
