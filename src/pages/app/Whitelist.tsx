@@ -185,12 +185,12 @@ const WhitelistPage: React.FC = () => {
               <Label>Rótulo (opcional)</Label>
               <Input {...register('label')} placeholder="Ex: João Silva" className="mt-1" />
             </div>
-            <DialogFooter>
+            <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => { reset(); setAddOpen(false) }}>Cancelar</Button>
               <Button type="submit" disabled={addMutation.isPending}>
                 {addMutation.isPending ? 'Adicionando...' : 'Adicionar'}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </DialogContent>
       </Dialog>
