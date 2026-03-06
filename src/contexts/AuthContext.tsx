@@ -47,7 +47,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (data) setProfile(data as UserProfile)
   }
 
-  const loadWorkspace = async (userId: string) => {
+  const loadWorkspace = async (userId: string): Promise<boolean> => {
+    // Small delay to allow DB trigger (handle_new_user) to complete on fresh signups
+    await new Promise(r => setTimeout(r, 300))
+
     const { data: memberData } = await supabase
       .from('workspace_members')
       .select('workspace_id')
@@ -63,11 +66,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single()
       if (wsData) {
         setWorkspace(wsData as Workspace)
-        return
+        return true
       }
     }
 
-    // Auto-recovery: create workspace if user has none
+    // Retry once more after 700ms (handles slow trigger execution)
+    await new Promise(r => setTimeout(r, 700))
+    const { data: retryMember } = await supabase
+      .from('workspace_members')
+      .select('workspace_id')
+      .eq('user_id', userId)
+      .limit(1)
+      .single()
+
+    if (retryMember?.workspace_id) {
+      const { data: retryWs } = await supabase
+        .from('workspaces')
+        .select('*')
+        .eq('id', retryMember.workspace_id)
+        .single()
+      if (retryWs) {
+        setWorkspace(retryWs as Workspace)
+        return true
+      }
+    }
+
+    // Auto-recovery: create workspace if user has none (last resort)
     try {
       const { data: ws, error: wsErr } = await supabase
         .from('workspaces')
@@ -78,10 +102,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await supabase.from('workspace_members').insert({ workspace_id: ws.id, user_id: userId, role: 'admin' })
         await supabase.from('workspace_settings').insert({ workspace_id: ws.id })
         setWorkspace(ws as Workspace)
+        // Force reload so the new workspaceId propagates cleanly to all components
+        setTimeout(() => window.location.reload(), 300)
+        return true
       }
     } catch {
       // silently fail — workspaceId stays null
     }
+
+    return false
   }
 
   const refreshWorkspace = async () => {
@@ -89,61 +118,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   useEffect(() => {
-    let initialized = false
-
-    // Carregar sessão existente primeiro
+    // Use getSession() first — restores from localStorage synchronously
+    // This avoids the race condition where onAuthStateChange fires INITIAL_SESSION
+    // before the token is available, causing auth.uid() = null in RLS policies
     supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
-      if (!initialized) {
-        initialized = true
-        setSession(existingSession)
-        setUser(existingSession?.user ?? null)
+      setSession(existingSession)
+      setUser(existingSession?.user ?? null)
 
-        if (existingSession?.user) {
-          Promise.all([
-            loadProfile(existingSession.user.id),
-            loadWorkspace(existingSession.user.id),
-          ]).finally(() => setLoading(false))
-        } else {
-          setLoading(false)
-        }
-      }
-    }).catch(() => {
-      if (!initialized) {
-        initialized = true
+      if (existingSession?.user) {
+        Promise.all([
+          loadProfile(existingSession.user.id),
+          loadWorkspace(existingSession.user.id),
+        ]).finally(() => setLoading(false))
+      } else {
         setLoading(false)
       }
+    }).catch(() => {
+      setLoading(false)
     })
 
-    // Listener para mudanças de autenticação (login/logout)
+    // Listener for sign-in / sign-out events only (not INITIAL_SESSION — handled above)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
+      async (event, newSession) => {
+        // Skip INITIAL_SESSION — already handled by getSession() above
+        if (event === 'INITIAL_SESSION') return
+
         setSession(newSession)
         setUser(newSession?.user ?? null)
 
         if (newSession?.user) {
-          await Promise.all([
-            loadProfile(newSession.user.id),
-            loadWorkspace(newSession.user.id),
-          ])
+          // Do NOT await here — calling Supabase inside onAuthStateChange
+          // synchronously can cause deadlocks. Use setTimeout to defer.
+          setTimeout(async () => {
+            await Promise.all([
+              loadProfile(newSession.user.id),
+              loadWorkspace(newSession.user.id),
+            ])
+            setLoading(false)
+          }, 0)
         } else {
           setProfile(null)
           setWorkspace(null)
+          setLoading(false)
         }
-
-        if (!initialized) {
-          initialized = true
-        }
-        setLoading(false)
       }
     )
 
-    // Fallback: garantir que o loading seja removido após 5s no máximo
-    const timeout = setTimeout(() => {
-      if (!initialized) {
-        initialized = true
-        setLoading(false)
-      }
-    }, 5000)
+    // Safety fallback: ensure loading is removed after 8s maximum
+    const timeout = setTimeout(() => setLoading(false), 8000)
 
     return () => {
       subscription.unsubscribe()
