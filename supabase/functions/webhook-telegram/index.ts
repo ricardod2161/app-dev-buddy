@@ -152,6 +152,20 @@ Deno.serve(async (req) => {
     // Update log
     await supabase.from('webhook_logs').update({ status: 'ok' }).eq('id', logId!)
 
+    // Fire-and-forget: AI processing
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    fetch(`${supabaseUrl}/functions/v1/process-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        conversation_id: conversationId,
+        message_text: messageText,
+        sender_phone: telegramIdentifier,
+        provider: 'TELEGRAM',
+      }),
+    }).catch((e) => console.error('process-message fire-and-forget error:', e))
+
     return new Response(JSON.stringify({ ok: true }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
