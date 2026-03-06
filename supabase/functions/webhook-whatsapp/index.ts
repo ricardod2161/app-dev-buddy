@@ -157,22 +157,32 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Whitelist check
+    // Whitelist check — only block if whitelist has entries AND phone is not in it
     const phoneE164 = senderPhone.startsWith('+') ? senderPhone : `+${senderPhone}`
-    const { data: whitelist } = await supabase
+    const { data: whitelistEntries, count: whitelistCount } = await supabase
       .from('whitelist_numbers')
-      .select('id')
+      .select('id', { count: 'exact' })
       .eq('workspace_id', workspaceId)
-      .eq('phone_e164', phoneE164)
       .eq('is_active', true)
-      .maybeSingle()
 
-    if (!whitelist) {
-      await supabase.from('webhook_logs').update({ status: 'blocked', error: 'Phone not in whitelist' }).eq('id', logId!)
-      return new Response(JSON.stringify({ ok: true, blocked: true }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    if (whitelistCount && whitelistCount > 0) {
+      // Whitelist is configured — check if phone is allowed
+      const { data: whitelistMatch } = await supabase
+        .from('whitelist_numbers')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('phone_e164', phoneE164)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (!whitelistMatch) {
+        await supabase.from('webhook_logs').update({ status: 'whitelist_blocked', error: `Phone ${phoneE164} not in whitelist` }).eq('id', logId!)
+        return new Response(JSON.stringify({ ok: true, blocked: true }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
     }
+    // If whitelist is empty, allow all messages through
 
     // Upsert conversation
     const { data: existingConv } = await supabase

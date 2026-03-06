@@ -135,31 +135,71 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
   }
 
   const autoConfigureWebhook = async () => {
-    const effectiveToken = botToken || integration?.telegram_bot_token_encrypted || ''
-    const secret = webhookSecret || integration?.webhook_secret || ''
-    if (!effectiveToken) {
-      toast.error('Preencha o Bot Token primeiro')
-      return
-    }
-    setWebhookLoading(true)
-    try {
-      const body: Record<string, string> = { url: webhookTelegramUrl }
-      if (secret) body.secret_token = secret
-      const res = await fetch(`https://api.telegram.org/bot${effectiveToken}/setWebhook`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        toast.success('Webhook configurado automaticamente! ✅')
-      } else {
-        toast.error(`Erro: ${data.description}`)
+    if (provider === 'TELEGRAM') {
+      const effectiveToken = botToken || integration?.telegram_bot_token_encrypted || ''
+      const secret = webhookSecret || integration?.webhook_secret || ''
+      if (!effectiveToken) {
+        toast.error('Preencha o Bot Token primeiro')
+        return
       }
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao configurar webhook')
-    } finally {
-      setWebhookLoading(false)
+      setWebhookLoading(true)
+      try {
+        const body: Record<string, string> = { url: webhookTelegramUrl }
+        if (secret) body.secret_token = secret
+        const res = await fetch(`https://api.telegram.org/bot${effectiveToken}/setWebhook`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const data = await res.json()
+        if (data.ok) {
+          toast.success('Webhook configurado no Telegram! ✅')
+        } else {
+          toast.error(`Erro: ${data.description}`)
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : 'Erro ao configurar webhook')
+      } finally {
+        setWebhookLoading(false)
+      }
+    } else if (provider === 'EVOLUTION') {
+      // Configure webhook directly on Evolution API
+      const effectiveApiUrl = (apiUrl || integration?.api_url || '').replace(/\/$/, '')
+      const effectiveApiKey = apiKey || integration?.api_key_encrypted || ''
+      const effectiveInstance = instanceId || integration?.instance_id || ''
+      if (!effectiveApiUrl || !effectiveApiKey || !effectiveInstance) {
+        toast.error('Preencha e salve a URL da API, API Key e Instance ID primeiro')
+        return
+      }
+      setWebhookLoading(true)
+      try {
+        const webhookBody = {
+          url: webhookWhatsappUrl,
+          webhook_by_events: false,
+          webhook_base64: false,
+          events: ['MESSAGES_UPSERT', 'messages.upsert'],
+        }
+        const res = await fetch(`${effectiveApiUrl}/webhook/set/${effectiveInstance}`, {
+          method: 'POST',
+          headers: {
+            'apikey': effectiveApiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(webhookBody),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          console.log('Evolution webhook set response:', data)
+          toast.success('Webhook configurado na Evolution API! ✅ Mensagens serão recebidas agora.')
+        } else {
+          const errData = await res.json().catch(() => ({}))
+          toast.error(`Erro ${res.status}: ${JSON.stringify(errData)}`)
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : 'Erro ao configurar webhook')
+      } finally {
+        setWebhookLoading(false)
+      }
     }
   }
 
