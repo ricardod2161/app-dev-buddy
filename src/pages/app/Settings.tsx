@@ -65,6 +65,8 @@ const SettingsPage: React.FC = () => {
       setBotPersonality(settings.bot_personality ?? '')
       setTimezone(settings.timezone ?? 'America/Sao_Paulo')
       setLanguage(settings.language ?? 'pt-BR')
+      setTtsEnabled(settings.tts_enabled ?? false)
+      setTtsVoiceId(settings.tts_voice_id ?? 'nPczCjzI2devNBz1zQrb')
     }
   }, [settings])
 
