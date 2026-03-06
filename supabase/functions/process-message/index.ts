@@ -84,17 +84,27 @@ Deno.serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY not configured')
 
-    // ── 1. Fetch workspace settings ──────────────────────────────────────────
-    const { data: settings } = await supabase
-      .from('workspace_settings')
-      .select('bot_response_format, language, timezone, bot_name, bot_personality, default_categories, default_tags')
-      .eq('workspace_id', workspace_id)
-      .maybeSingle()
+    // ── 1. Fetch workspace settings + contact name ───────────────────────────
+    const [{ data: settings }, { data: contactRow }] = await Promise.all([
+      supabase
+        .from('workspace_settings')
+        .select('bot_response_format, language, timezone, bot_name, bot_personality, default_categories, default_tags')
+        .eq('workspace_id', workspace_id)
+        .maybeSingle(),
+      supabase
+        .from('contacts')
+        .select('name, notes')
+        .eq('workspace_id', workspace_id)
+        .eq('phone_e164', sender_phone)
+        .maybeSingle(),
+    ])
 
     const responseFormat = settings?.bot_response_format ?? 'medio'
     const botName = (settings as Record<string, unknown>)?.bot_name as string ?? 'Assistente IA'
     const botPersonality = (settings as Record<string, unknown>)?.bot_personality as string | null ?? null
     const tz = (settings as Record<string, unknown>)?.timezone as string ?? 'America/Sao_Paulo'
+    const contactName = contactRow?.name ?? null
+    const contactNotes = contactRow?.notes ?? null
 
     // ── Date/time awareness ──────────────────────────────────────────────────
     const nowStr = new Date().toLocaleString('pt-BR', {
