@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { Plus, Trash2, List } from 'lucide-react'
+import { Plus, Trash2, List, AlertCircle, RefreshCw, Loader2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -37,10 +37,11 @@ const phoneSchema = z.object({
 type PhoneForm = z.infer<typeof phoneSchema>
 
 const WhitelistPage: React.FC = () => {
-  const { workspaceId } = useAuth()
+  const { workspaceId, loading: authLoading, refreshWorkspace } = useAuth()
   const qc = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
   const [deleteItem, setDeleteItem] = useState<WhitelistNumber | null>(null)
+  const [retrying, setRetrying] = useState(false)
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<PhoneForm>({
     resolver: zodResolver(phoneSchema),
@@ -102,6 +103,41 @@ const WhitelistPage: React.FC = () => {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  const handleRetry = async () => {
+    setRetrying(true)
+    await refreshWorkspace()
+    setRetrying(false)
+  }
+
+  // Auth loading state
+  if (authLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-10 w-48" />
+        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+      </div>
+    )
+  }
+
+  // No workspace found
+  if (!workspaceId) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
+          <AlertCircle className="w-7 h-7 text-muted-foreground" />
+        </div>
+        <h3 className="text-base font-semibold text-foreground">Workspace não encontrado</h3>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          Seu usuário não está associado a nenhum workspace. Clique em "Tentar novamente" para recuperar automaticamente.
+        </p>
+        <Button variant="outline" onClick={handleRetry} disabled={retrying}>
+          {retrying ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          Tentar novamente
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4 animate-slide-up">
