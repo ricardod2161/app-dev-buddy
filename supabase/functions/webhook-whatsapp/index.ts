@@ -32,16 +32,17 @@ Deno.serve(async (req) => {
     }
 
     // Detect provider from payload shape
-    // Meta Cloud API sends object.entry structure
-    // Evolution API sends event + data structure
     const isMeta = !!(payload.object && payload.entry)
     provider = isMeta ? 'CLOUD' : 'EVOLUTION'
 
-    // Extract phone number to find workspace via integration
     let senderPhone: string | null = null
     let messageText: string | null = null
     let providerMessageId: string | null = null
     let eventType = 'unknown'
+    let messageType = 'text'
+    let mediaUrl: string | null = null
+    let mediaBase64: string | null = null
+    let mediaMime: string | null = null
 
     if (isMeta) {
       // Meta Cloud API format
@@ -53,8 +54,33 @@ Deno.serve(async (req) => {
       if (messages?.length) {
         const msg = messages[0]
         senderPhone = msg.from as string
-        messageText = (msg.text as Record<string, string>)?.body ?? null
         providerMessageId = msg.id as string
+        const msgType = msg.type as string
+
+        if (msgType === 'text') {
+          messageType = 'text'
+          messageText = (msg.text as Record<string, string>)?.body ?? null
+        } else if (msgType === 'audio') {
+          messageType = 'audio'
+          mediaUrl = (msg.audio as Record<string, string>)?.id ?? null // Meta uses media ID
+          mediaMime = 'audio/ogg'
+        } else if (msgType === 'image') {
+          messageType = 'image'
+          const imgCaption = (msg.image as Record<string, string>)?.caption ?? null
+          messageText = imgCaption
+          mediaUrl = (msg.image as Record<string, string>)?.id ?? null
+          mediaMime = 'image/jpeg'
+        } else if (msgType === 'document') {
+          messageType = 'document'
+          mediaUrl = (msg.document as Record<string, string>)?.id ?? null
+          mediaMime = (msg.document as Record<string, string>)?.mime_type ?? 'application/octet-stream'
+        } else if (msgType === 'video') {
+          messageType = 'video'
+          mediaUrl = (msg.video as Record<string, string>)?.id ?? null
+          mediaMime = 'video/mp4'
+        } else if (msgType === 'sticker') {
+          messageType = 'sticker'
+        }
       }
     } else {
       // Evolution API format
@@ -62,14 +88,52 @@ Deno.serve(async (req) => {
       const data = payload.data as Record<string, unknown>
       const key = data?.key as Record<string, unknown>
       senderPhone = (key?.remoteJid as string)?.replace('@s.whatsapp.net', '').replace('@g.us', '') ?? null
-      const message = data?.message as Record<string, unknown>
-      messageText = (message?.conversation as string) ?? (message?.extendedTextMessage as Record<string, string>)?.text ?? null
       providerMessageId = key?.id as string
+      const message = data?.message as Record<string, unknown>
+
+      // Extract base64 if provided by Evolution
+      mediaBase64 = (data?.base64 as string) ?? null
+
+      if (message?.conversation || message?.extendedTextMessage) {
+        messageType = 'text'
+        messageText = (message?.conversation as string) ?? (message?.extendedTextMessage as Record<string, string>)?.text ?? null
+      } else if (message?.audioMessage) {
+        messageType = 'audio'
+        const audioMsg = message.audioMessage as Record<string, unknown>
+        mediaUrl = audioMsg?.url as string ?? null
+        mediaMime = (audioMsg?.mimetype as string) ?? 'audio/ogg'
+        // For PTT (push-to-talk voice notes)
+        if (audioMsg?.ptt) messageType = 'audio'
+      } else if (message?.imageMessage) {
+        messageType = 'image'
+        const imgMsg = message.imageMessage as Record<string, unknown>
+        mediaUrl = imgMsg?.url as string ?? null
+        mediaMime = (imgMsg?.mimetype as string) ?? 'image/jpeg'
+        messageText = (imgMsg?.caption as string) ?? null
+      } else if (message?.documentMessage) {
+        messageType = 'document'
+        const docMsg = message.documentMessage as Record<string, unknown>
+        mediaUrl = docMsg?.url as string ?? null
+        mediaMime = (docMsg?.mimetype as string) ?? 'application/octet-stream'
+        messageText = (docMsg?.fileName as string) ?? null
+      } else if (message?.videoMessage) {
+        messageType = 'video'
+        const vidMsg = message.videoMessage as Record<string, unknown>
+        mediaUrl = vidMsg?.url as string ?? null
+        mediaMime = (vidMsg?.mimetype as string) ?? 'video/mp4'
+        messageText = (vidMsg?.caption as string) ?? null
+      } else if (message?.stickerMessage) {
+        messageType = 'sticker'
+        mediaUrl = (message.stickerMessage as Record<string, unknown>)?.url as string ?? null
+      } else if (message?.reactionMessage) {
+        // Ignore reactions
+        return new Response(JSON.stringify({ ok: true, ignored: 'reaction' }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
     }
 
     // Find workspace by matching the integration's instance
-    // For Evolution: use the instance from payload
-    // We look for any active integration of the right provider
     const instanceName = isMeta ? null : ((payload.data as Record<string, unknown>)?.instance as string) ?? null
 
     let integrationQuery = supabase
@@ -90,10 +154,10 @@ Deno.serve(async (req) => {
       })
     }
 
-    // HMAC-SHA256 signature validation
     const integration = integrations[0]
     workspaceId = integration.workspace_id
 
+    // HMAC-SHA256 signature validation
     if (integration.webhook_secret) {
       const sigHeader = req.headers.get('x-hub-signature-256') ?? req.headers.get('x-evolution-signature')
       if (sigHeader) {
@@ -157,16 +221,15 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Whitelist check — only block if whitelist has entries AND phone is not in it
+    // Whitelist check
     const phoneE164 = senderPhone.startsWith('+') ? senderPhone : `+${senderPhone}`
-    const { data: whitelistEntries, count: whitelistCount } = await supabase
+    const { count: whitelistCount } = await supabase
       .from('whitelist_numbers')
       .select('id', { count: 'exact' })
       .eq('workspace_id', workspaceId)
       .eq('is_active', true)
 
     if (whitelistCount && whitelistCount > 0) {
-      // Whitelist is configured — check if phone is allowed
       const { data: whitelistMatch } = await supabase
         .from('whitelist_numbers')
         .select('id')
@@ -182,7 +245,6 @@ Deno.serve(async (req) => {
         })
       }
     }
-    // If whitelist is empty, allow all messages through
 
     // Upsert conversation
     const { data: existingConv } = await supabase
@@ -208,7 +270,7 @@ Deno.serve(async (req) => {
       }).select('id').single()
 
       if (convErr || !newConv) {
-        // Race condition: another request may have just inserted this conversation
+        // Race condition: retry fetch
         const { data: retryConv } = await supabase
           .from('conversations')
           .select('id')
@@ -231,9 +293,10 @@ Deno.serve(async (req) => {
       workspace_id: workspaceId,
       conversation_id: conversationId,
       direction: 'IN',
-      type: 'text',
+      type: messageType,
       body_text: messageText,
       provider_message_id: providerMessageId,
+      media_url: mediaUrl,
       timestamp: new Date().toISOString(),
     })
 
@@ -257,6 +320,10 @@ Deno.serve(async (req) => {
         message_text: messageText,
         sender_phone: phoneE164,
         provider,
+        message_type: messageType,
+        media_url: mediaUrl,
+        media_base64: mediaBase64,
+        media_mime: mediaMime,
       }),
     }).catch((e) => console.error('process-message fire-and-forget error:', e))
 
