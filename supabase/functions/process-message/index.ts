@@ -59,11 +59,12 @@ Deno.serve(async (req) => {
     // ── 1. Fetch workspace settings ──────────────────────────────────────────
     const { data: settings } = await supabase
       .from('workspace_settings')
-      .select('bot_response_format, language, timezone')
+      .select('bot_response_format, language, timezone, bot_name')
       .eq('workspace_id', workspace_id)
       .maybeSingle()
 
     const responseFormat = settings?.bot_response_format ?? 'medio'
+    const botName = (settings as Record<string, unknown>)?.bot_name as string ?? 'Assistente IA'
     const formatInstruction =
       responseFormat === 'curto'
         ? 'Responda de forma muito curta e direta (1-2 linhas).'
