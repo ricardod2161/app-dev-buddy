@@ -200,13 +200,30 @@ Deno.serve(async (req) => {
         provider,
       }).eq('id', conversationId)
     } else {
-      const { data: newConv } = await supabase.from('conversations').insert({
+      const { data: newConv, error: convErr } = await supabase.from('conversations').insert({
         workspace_id: workspaceId,
         contact_phone: phoneE164,
         provider,
         last_message_at: new Date().toISOString(),
       }).select('id').single()
-      conversationId = newConv!.id
+
+      if (convErr || !newConv) {
+        // Race condition: another request may have just inserted this conversation
+        const { data: retryConv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('workspace_id', workspaceId)
+          .eq('contact_phone', phoneE164)
+          .maybeSingle()
+        if (!retryConv) throw new Error(`Failed to create/find conversation: ${convErr?.message ?? 'unknown'}`)
+        conversationId = retryConv.id
+        await supabase.from('conversations').update({
+          last_message_at: new Date().toISOString(),
+          provider,
+        }).eq('id', conversationId)
+      } else {
+        conversationId = newConv.id
+      }
     }
 
     // Insert message
