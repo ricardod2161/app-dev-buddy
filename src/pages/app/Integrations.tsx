@@ -373,25 +373,14 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
               <Input value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+5511999990000" className="mt-1" />
             </div>
           </div>
-
           <Separator />
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Configuração do Webhook</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Webhook Secret</p>
           <div>
             <Label>
               Webhook Secret{' '}
               {integration && <span className="text-muted-foreground text-xs font-normal">(deixe em branco para manter)</span>}
             </Label>
             <Input value={webhookSecret} onChange={e => setWebhookSecret(e.target.value)} type="password" placeholder="qualquer string segura" className="mt-1" />
-          </div>
-          <div>
-            <Label className="mb-1.5 block">URL do Webhook — configure no painel da Evolution</Label>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
-              <code className="text-xs font-mono flex-1 truncate text-foreground">{webhookWhatsappUrl}</code>
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(webhookWhatsappUrl)}>
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Eventos necessários: <code className="bg-muted px-1 rounded">messages.upsert</code></p>
           </div>
         </div>
       )}
@@ -412,24 +401,14 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
               <Input value={chatId} onChange={e => setChatId(e.target.value)} placeholder="-100xxxxxxxxx" className="mt-1" />
             </div>
           </div>
-
           <Separator />
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Configuração do Webhook</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Webhook Secret</p>
           <div>
             <Label>
               Webhook Secret{' '}
               {integration && <span className="text-muted-foreground text-xs font-normal">(deixe em branco para manter)</span>}
             </Label>
             <Input value={webhookSecret} onChange={e => setWebhookSecret(e.target.value)} type="password" placeholder="qualquer string segura" className="mt-1" />
-          </div>
-          <div>
-            <Label className="mb-1.5 block">URL do Webhook — usada pelo Telegram para enviar atualizações</Label>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
-              <code className="text-xs font-mono flex-1 truncate text-foreground">{webhookTelegramUrl}</code>
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => copyToClipboard(webhookTelegramUrl)}>
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
           </div>
         </div>
       )}
@@ -442,7 +421,7 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
           {loading
             ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             : saveSuccess
-              ? <CheckCircle className="w-4 h-4 mr-2 text-green-500" />
+              ? <CheckCircle className="w-4 h-4 mr-2" />
               : null
           }
           {saveSuccess ? 'Salvo!' : 'Salvar'}
@@ -461,41 +440,6 @@ const IntegrationForm: React.FC<IntegrationFormProps> = ({ provider, integration
           </Button>
         )}
       </div>
-
-      {/* Guide Accordion */}
-      <Accordion type="single" collapsible>
-        <AccordionItem value="guide">
-          <AccordionTrigger className="text-sm">
-            <span className="flex items-center gap-2"><BookOpen className="w-4 h-4" />Como Configurar</span>
-          </AccordionTrigger>
-          <AccordionContent className="text-sm text-muted-foreground space-y-3 pt-2">
-            {isEvolutionOrCloud && (
-              <ol className="list-decimal list-inside space-y-2">
-                <li>Tenha uma instância da <strong className="text-foreground">Evolution API</strong> rodando (self-hosted ou cloud)</li>
-                <li>Preencha a <strong className="text-foreground">URL da API</strong> — ex: <code className="bg-muted px-1 rounded">https://sua-evolution.com</code></li>
-                <li>Preencha a <strong className="text-foreground">API Key</strong> da sua instância</li>
-                <li>Preencha o <strong className="text-foreground">Instance ID</strong> (nome da instância)</li>
-                <li>Preencha o <strong className="text-foreground">Número</strong> no formato internacional: <code className="bg-muted px-1 rounded">+5511999990000</code></li>
-                <li>Defina um <strong className="text-foreground">Webhook Secret</strong> (qualquer string segura)</li>
-                <li>No painel da Evolution, configure o webhook com a URL acima e o evento <code className="bg-muted px-1 rounded">messages.upsert</code></li>
-                <li>Ative a integração e clique em <strong className="text-foreground">Salvar</strong></li>
-              </ol>
-            )}
-            {provider === 'TELEGRAM' && (
-              <ol className="list-decimal list-inside space-y-2">
-                <li>Abra o <strong className="text-foreground">@BotFather</strong> no Telegram</li>
-                <li>Envie <code className="bg-muted px-1 rounded">/newbot</code> e siga as instruções para criar o bot</li>
-                <li>Copie o token gerado (ex: <code className="bg-muted px-1 rounded">123456789:ABCdef...</code>)</li>
-                <li>Cole o token no campo <strong className="text-foreground">Bot Token</strong> acima</li>
-                <li>Opcionalmente, defina um <strong className="text-foreground">Webhook Secret</strong> para segurança extra</li>
-                <li>Clique em <strong className="text-foreground">Salvar</strong> e depois em <strong className="text-foreground">Configurar Webhook Automaticamente</strong></li>
-                <li>Envie <code className="bg-muted px-1 rounded">/start</code> ao bot para obter o Chat ID</li>
-                <li>Adicione o número na Whitelist no formato <code className="bg-muted px-1 rounded">tg:CHAT_ID</code></li>
-              </ol>
-            )}
-          </AccordionContent>
-        </AccordionItem>
-      </Accordion>
 
       {/* Modal Simular Webhook */}
       <Dialog open={simulateOpen} onOpenChange={setSimulateOpen}>
