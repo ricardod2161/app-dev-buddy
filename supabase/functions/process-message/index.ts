@@ -1022,9 +1022,75 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       } else {
         replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}".`
       }
+    } else if (fnName === 'weekly_summary') {
+      const now = new Date()
+      const weekStart = new Date(now)
+      weekStart.setDate(now.getDate() - 7)
+      weekStart.setHours(0, 0, 0, 0)
+
+      // Fetch all week data in parallel
+      const [
+        { data: weekNotes },
+        { data: weekTasksDone },
+        { data: weekReminders },
+      ] = await Promise.all([
+        supabase.from('notes').select('id, title, category, created_at').eq('workspace_id', workspace_id).gte('created_at', weekStart.toISOString()).order('created_at', { ascending: false }).limit(20),
+        supabase.from('tasks').select('id, title, status, completed_at').eq('workspace_id', workspace_id).eq('status', 'done').gte('updated_at', weekStart.toISOString()).limit(10),
+        supabase.from('reminders').select('id, title, status').eq('workspace_id', workspace_id).in('status', ['sent', 'scheduled']).gte('remind_at', weekStart.toISOString()).limit(10),
+      ])
+
+      // Financial total for the week
+      const allWeekNotes = weekNotes ?? []
+      const financialNotes = allWeekNotes.filter(n => normalizeFinancialCategory(n.category) || hasFinancialContent(n.title ?? ''))
+      let weekTotal = 0
+      const financialLines: string[] = []
+      for (const fn of financialNotes) {
+        const { data: fullNote } = await supabase.from('notes').select('title, content').eq('id', fn.id).single()
+        if (fullNote) {
+          const text = `${fullNote.title ?? ''} ${fullNote.content ?? ''}`
+          const fin = extractFinancialValues(text)
+          if (fin.total > 0) {
+            weekTotal += fin.total
+            financialLines.push(`  • ${fn.title} — ${formatCurrency(fin.total)}`)
+          }
+        }
+      }
+
+      // Count notes by category
+      const categoryCount: Record<string, number> = {}
+      for (const n of allWeekNotes) {
+        const cat = n.category ?? 'Geral'
+        categoryCount[cat] = (categoryCount[cat] ?? 0) + 1
+      }
+      const notesByCat = Object.entries(categoryCount).map(([c, count]) => `  • ${c}: ${count}`).join('\n') || '  Nenhuma nota.'
+      
+      const tasksDoneList = (weekTasksDone ?? []).length > 0
+        ? (weekTasksDone ?? []).map(t => `  ✅ ${t.title}`).join('\n')
+        : '  Nenhuma tarefa concluída.'
+      
+      const remindersSent = (weekReminders ?? []).filter(r => r.status === 'sent').length
+      const remindersScheduled = (weekReminders ?? []).filter(r => r.status === 'scheduled').length
+
+      const sections: string[] = [
+        `${fnArgs.reply_message}`,
+        ``,
+        `📝 *Notas criadas (${allWeekNotes.length}):*\n${notesByCat}`,
+        ``,
+        `✅ *Tarefas concluídas (${(weekTasksDone ?? []).length}):*\n${tasksDoneList}`,
+        ``,
+        `⏰ *Lembretes:* ${remindersSent} disparados, ${remindersScheduled} agendados`,
+      ]
+      if (weekTotal > 0) {
+        sections.push(``)
+        sections.push(`💰 *Gastos da semana (${financialLines.length} registros):*\n${financialLines.slice(0, 5).join('\n')}\n  *Total: ${formatCurrency(weekTotal)}*`)
+      } else {
+        sections.push(``)
+        sections.push(`💰 *Gastos:* Nenhum gasto registrado na semana.`)
+      }
+      replyText = sections.join('\n')
     } else {
       // just_reply
-      replyText = fnArgs.message ?? 'Olá! Como posso ajudar? 😊'
+      replyText = (fnArgs.message as string) ?? 'Olá! Como posso ajudar? 😊'
     }
 
     // ── 10. Save AI reply to messages table ──────────────────────────────────
