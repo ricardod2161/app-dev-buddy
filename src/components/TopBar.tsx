@@ -19,6 +19,7 @@ const pageTitles: Record<string, string> = {
   '/app': 'Dashboard',
   '/app/notes': 'Notas',
   '/app/tasks': 'Tarefas',
+  '/app/reminders': 'Lembretes',
   '/app/reports': 'Relatórios',
   '/app/conversations': 'Conversas',
   '/app/integrations': 'Integrações',
