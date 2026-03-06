@@ -952,8 +952,17 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     // Triggers when: (a) user sent audio, OR (b) user explicitly requested audio reply in text
     const ttsEnabled = (settings as Record<string, unknown>)?.tts_enabled === true
     const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'FGY2WhTYpPnrIDTdsKH5'
-    // Detect user request for audio reply — broad match
-    const userRequestedAudio = message_type === 'text' && /[áa][u]?[d]?[i]?[o]|respond[ae].*[áa]udio|[áa]udio.*respond|mim\s+respond|me\s+respond.*[áa]udio|fala.*[áa]udio|[áa]udio.*fala|manda.*[áa]udio|[áa]udio.*manda|em\s+[áa]udio|voz\s*(please|pf|pfv|por\s*favor)?/i.test(message_text ?? '')
+
+    // Broad regex: captures "áudio", "audio", "manda áudio", "responde em áudio", "em voz", "fala pra mim", etc.
+    const userRequestedAudio = message_type === 'text' && (
+      /\b[áa]udio\b/i.test(message_text ?? '') ||
+      /respond[ae]\s*(em\s*)?[áa]udio/i.test(message_text ?? '') ||
+      /manda\s*(um\s*)?[áa]udio/i.test(message_text ?? '') ||
+      /me\s*(manda|envia|fala|diz)\s*(em\s*)?[áa]udio/i.test(message_text ?? '') ||
+      /fala\s*(pra\s*mim|em\s*voz|em\s*[áa]udio)/i.test(message_text ?? '') ||
+      /em\s*voz\b/i.test(message_text ?? '') ||
+      /\bvoz\s*(por\s*favor|pf|pfv)?\b/i.test(message_text ?? '')
+    )
     const shouldSendAudio = ttsEnabled && (message_type === 'audio' || userRequestedAudio)
 
     console.log(`[TTS] ttsEnabled=${ttsEnabled} | message_type=${message_type} | userRequestedAudio=${userRequestedAudio} | shouldSendAudio=${shouldSendAudio} | voice=${ttsVoiceId}`)
@@ -962,7 +971,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       try {
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
-        console.log(`[TTS] Chamando tts-function com voice_id=${ttsVoiceId} | texto=${replyText.slice(0, 80)}...`)
+        // Strip the "[Áudio]:" prefix that AI sometimes adds, to avoid TTS reading it literally
+        const ttsText = replyText.replace(/^\[?[áa]udio\]?:\s*/i, '').trim()
+        console.log(`[TTS] Chamando tts-function com voice_id=${ttsVoiceId} | texto=${ttsText.slice(0, 80)}...`)
         const ttsRes = await fetch(`${SUPABASE_URL}/functions/v1/elevenlabs-tts`, {
           method: 'POST',
           headers: {
@@ -970,7 +981,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
             'apikey': SUPABASE_ANON_KEY,
           },
-          body: JSON.stringify({ text: replyText, voice_id: ttsVoiceId }),
+          body: JSON.stringify({ text: ttsText, voice_id: ttsVoiceId }),
         })
         if (ttsRes.ok) {
           const { base64, content_type } = await ttsRes.json()
@@ -983,9 +994,21 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         } else {
           const errBody = await ttsRes.text()
           console.error(`[TTS] Falha na geração de áudio: status=${ttsRes.status} | body=${errBody.slice(0, 500)}`)
+          // Fallback: inform user that audio is unavailable
+          await sendReply({
+            supabase, provider, workspace_id, sender_phone,
+            replyText: '⚠️ Não consegui gerar o áudio agora. A resposta de texto já foi enviada acima.',
+          })
         }
       } catch (ttsErr) {
         console.error('[TTS] Erro inesperado no bloco TTS:', ttsErr)
+        // Fallback notification on unexpected error
+        try {
+          await sendReply({
+            supabase, provider, workspace_id, sender_phone,
+            replyText: '⚠️ Ocorreu um erro ao gerar o áudio. Verifique a resposta em texto acima.',
+          })
+        } catch (_) { /* ignore secondary failure */ }
       }
     }
 
@@ -1050,7 +1073,7 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
   const provider = integration.provider as string
 
   if (provider === 'EVOLUTION') {
-    await fetch(`${integration.api_url}/message/sendText/${integration.instance_id}`, {
+    const res = await fetch(`${integration.api_url}/message/sendText/${integration.instance_id}`, {
       method: 'POST',
       headers: {
         apikey: (integration.api_key_encrypted as string) ?? '',
@@ -1058,8 +1081,14 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
       },
       body: JSON.stringify({ number: phone, text }),
     })
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error(`[dispatchReply] EVOLUTION sendText failed (${res.status}):`, errBody.slice(0, 300))
+    } else {
+      console.log(`[dispatchReply] EVOLUTION sendText OK → phone=${phone}`)
+    }
   } else if (provider === 'CLOUD') {
-    await fetch(`https://graph.facebook.com/v19.0/${integration.phone_number}/messages`, {
+    const res = await fetch(`https://graph.facebook.com/v19.0/${integration.phone_number}/messages`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${integration.api_key_encrypted}`,
@@ -1072,13 +1101,25 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
         text: { body: text },
       }),
     })
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error(`[dispatchReply] CLOUD sendText failed (${res.status}):`, errBody.slice(0, 300))
+    } else {
+      console.log(`[dispatchReply] CLOUD sendText OK → phone=${phone}`)
+    }
   } else if (provider === 'TELEGRAM') {
     const chatId = phone.startsWith('tg:') ? phone.slice(3) : phone
-    await fetch(`https://api.telegram.org/bot${integration.telegram_bot_token_encrypted}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${integration.telegram_bot_token_encrypted}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
     })
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error(`[dispatchReply] TELEGRAM sendMessage failed (${res.status}):`, errBody.slice(0, 300))
+    } else {
+      console.log(`[dispatchReply] TELEGRAM sendMessage OK → chat=${chatId}`)
+    }
   }
 }
 
