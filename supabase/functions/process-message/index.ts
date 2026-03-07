@@ -452,6 +452,23 @@ ${message_type === 'image' ? '📷 Imagem — descreva o que vê e sugira ação
 ${message_type === 'document' ? '📄 Documento — resuma o conteúdo e ofereça salvar como nota' : ''}
 ${message_type === 'text' ? '💬 Mensagem de texto' : ''}
 
+## 🗑️ Exclusão de Itens — OBRIGATÓRIO
+Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
+- Tarefa → use **delete_task** com o título completo ou parte do título
+- Nota → use **delete_note** com o título ou parte dele
+- Lembrete → use **cancel_reminder** (excluir lembrete = cancelar lembrete)
+
+Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", "não preciso mais de", "cancela", "remove", "zera", "descarta", "exclui", "apaga", "deleta"
+
+Exemplos OBRIGATÓRIOS de reconhecimento:
+- "exclui a tarefa de ligar pro banco" → delete_task com task_title="ligar pro banco"
+- "apaga a nota de reunião" → delete_note com note_title="reunião"  
+- "cancela o lembrete de academia" → cancel_reminder com reminder_title="academia"
+- "não preciso mais da tarefa X" → delete_task
+- "remove a nota sobre Y" → delete_note
+
+⚠️ ATENÇÃO: Quando não encontrar o item pelo nome exato, NÃO retorne erro vazio — o handler vai listar as opções disponíveis automaticamente.
+
 ## Regras de Ouro
 1. ${formatInstruction}
 2. Responda SEMPRE em português brasileiro
