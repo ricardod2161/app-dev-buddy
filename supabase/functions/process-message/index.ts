@@ -195,6 +195,11 @@ Deno.serve(async (req) => {
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
 
+    // Skip financial query for messages without financial content (perf optimization)
+    const needsFinancial = hasFinancialContent(message_text ?? '') || message_type === 'audio'
+    // Simple requests get smaller context windows → fewer tokens → faster model response
+    const isSimpleRequest = !needsFinancial && message_type === 'text'
+
     const [
       { data: historyRows },
       { data: recentNotes },
@@ -202,28 +207,28 @@ Deno.serve(async (req) => {
       { data: upcomingReminders },
       { data: todayFinancialNotes },
     ] = await Promise.all([
-      // conversation history — last 12 messages
+      // conversation history — 8 for simple, 12 for complex
       supabase
         .from('messages')
         .select('direction, body_text, type, created_at')
         .eq('conversation_id', conversation_id)
         .order('created_at', { ascending: false })
-        .limit(12),
-      // recent notes — expanded to 15 to improve deduplication awareness
+        .limit(isSimpleRequest ? 8 : 12),
+      // recent notes — 6 for simple, 15 for complex
       supabase
         .from('notes')
         .select('id, title, category, content, created_at')
         .eq('workspace_id', workspace_id)
         .order('created_at', { ascending: false })
-        .limit(15),
-      // pending tasks — FIX: use 'doing' not 'in_progress'
+        .limit(isSimpleRequest ? 6 : 15),
+      // pending tasks — 6 for simple, 10 for complex
       supabase
         .from('tasks')
         .select('id, title, status, priority, due_at')
         .eq('workspace_id', workspace_id)
         .in('status', ['todo', 'doing'])
         .order('due_at', { ascending: true, nullsFirst: false })
-        .limit(10),
+        .limit(isSimpleRequest ? 6 : 10),
       // upcoming reminders
       supabase
         .from('reminders')
@@ -233,13 +238,15 @@ Deno.serve(async (req) => {
         .gte('remind_at', new Date().toISOString())
         .order('remind_at', { ascending: true })
         .limit(5),
-      // today's financial notes for spend total
-      supabase
-        .from('notes')
-        .select('title, content')
-        .eq('workspace_id', workspace_id)
-        .or(`category.eq.Financeiro,title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%`)
-        .gte('created_at', todayStart.toISOString()),
+      // today's financial notes — skipped when not needed (saves ~80ms per message)
+      needsFinancial
+        ? supabase
+            .from('notes')
+            .select('title, content')
+            .eq('workspace_id', workspace_id)
+            .or(`category.eq.Financeiro,title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%`)
+            .gte('created_at', todayStart.toISOString())
+        : Promise.resolve({ data: [] as { title: string | null; content: string | null }[], error: null }),
     ])
 
     const history = (historyRows ?? []).reverse()
@@ -305,7 +312,7 @@ Deno.serve(async (req) => {
 
       let transcribed = false
 
-      for (const model of ['google/gemini-2.5-pro', 'google/gemini-2.5-flash']) {
+      for (const model of ['google/gemini-2.5-flash', 'google/gemini-2.5-pro']) {
         if (transcribed) break
         try {
           const transcribeRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -815,9 +822,10 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     ]
 
     // ── 9. AI call — smart model routing + failover ───────────────────────────
-    // Complex requests (audio, summaries, financial analysis) → pro model first
-    // Simple text requests → flash first (faster + cheaper)
-    const isComplex = isComplexRequest(effectiveText ?? '', message_type)
+    // For audio: use the TRANSCRIBED text (not the type) to evaluate complexity.
+    // "Apaga a tarefa X" (audio) → flash. "Resumo semanal" (audio) → pro.
+    const routingType = message_type === 'audio' ? 'text' : message_type
+    const isComplex = isComplexRequest(effectiveText ?? '', routingType)
     const AI_MODELS = isComplex
       ? ['google/gemini-2.5-pro', 'google/gemini-3-flash-preview', 'google/gemini-2.5-flash']
       : ['google/gemini-3-flash-preview', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro']
