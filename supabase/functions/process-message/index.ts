@@ -822,9 +822,10 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     ]
 
     // ── 9. AI call — smart model routing + failover ───────────────────────────
-    // Complex requests (audio, summaries, financial analysis) → pro model first
-    // Simple text requests → flash first (faster + cheaper)
-    const isComplex = isComplexRequest(effectiveText ?? '', message_type)
+    // For audio: use the TRANSCRIBED text (not the type) to evaluate complexity.
+    // "Apaga a tarefa X" (audio) → flash. "Resumo semanal" (audio) → pro.
+    const routingType = message_type === 'audio' ? 'text' : message_type
+    const isComplex = isComplexRequest(effectiveText ?? '', routingType)
     const AI_MODELS = isComplex
       ? ['google/gemini-2.5-pro', 'google/gemini-3-flash-preview', 'google/gemini-2.5-flash']
       : ['google/gemini-3-flash-preview', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro']
