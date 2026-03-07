@@ -305,7 +305,7 @@ Deno.serve(async (req) => {
 
       let transcribed = false
 
-      for (const model of ['google/gemini-2.5-pro', 'google/gemini-2.5-flash']) {
+      for (const model of ['google/gemini-2.5-flash', 'google/gemini-2.5-pro']) {
         if (transcribed) break
         try {
           const transcribeRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
