@@ -1,107 +1,173 @@
 
-## Análise Completa — O Que Fazer na Tela de Integrações
+## Plan: 15 Engineering Improvements
 
-### O Que Está na Tela Hoje (do print)
-A tela atual tem:
-- Tabs: WhatsApp Evolution | WhatsApp Cloud | Telegram
-- Um card com formulário de configuração (URL, API Key, Instance ID, etc.)
-- Badges de status (Configurada / Ativo)
-- Botões de ação na base: Salvar, Testar Conexão, Simular Webhook, Configurar Webhook
-
-### Problemas Identificados Como Engenheiro de Sistema
-
-**1. Zero visibilidade de saúde em tempo real**
-Não há nenhum indicador de "o sistema está vivo agora?". O usuário precisa mandar mensagem no WhatsApp para descobrir se está funcionando. Isso é crítico.
-
-**2. Formulário sem feedback de diagnóstico**
-Quando algo falha (webhook bloqueado, instância desconectada), a UI não mostra nada. A pessoa vai em Logs e não entende o que vê.
-
-**3. Tabs planas não mostram status de relance**
-Para saber qual integração está ativa, o usuário precisa clicar em cada tab. Em sistemas profissionais, o status aparece no próprio header da tab.
-
-**4. Sem contagem de métricas operacionais**
-Quantas mensagens foram processadas hoje? Quantas deram erro? Quanto tempo a última mensagem demorou? São métricas zero-cost de implementar (estão no DB) mas ausentes na UI.
-
-**5. Botão "Configurar Webhook na Evolution" sem feedback de resultado real**
-Chama a API mas não mostra o estado atual do webhook configurado (URL, eventos registrados, se está ativo).
-
-**6. Campos de credenciais sem máscaras inteligentes**
-API Key aparece como `password` cego. O usuário não consegue verificar se a chave está correta sem redigitar.
-
-**7. Sem modo de "diagnóstico completo"**
-Um botão único que testa todos os componentes em cadeia: API → Webhook → Process-message → WhatsApp reply.
+This is a large batch of improvements across 8 files. Here's exactly what gets changed and why.
 
 ---
 
-### Plano de Melhorias (Da mais impactante para a menor)
+### Files to modify
 
-#### A — Health Dashboard (visibilidade real-time)
-Adicionar um painel de saúde NO TOPO da página com cards de status live:
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  🟢 Evolution API     🟢 Webhook Ativo     🟢 IA Respondendo   │
-│  Conectada            73 msgs hoje         Última: 2min atrás   │
-└─────────────────────────────────────────────────────────────────┘
 ```
-
-Dados já existem no DB: `messages` table (total hoje), `webhook_logs` (last entry), `integrations` (is_active). Sem custo de backend novo.
-
-#### B — Tabs com indicadores de status embutidos
-Mudar as tabs de texto simples para mostrar o badge inline:
-- `WhatsApp Evolution ✅` quando configurada e ativa
-- `WhatsApp Cloud ⚠️` quando não configurada
-- `Telegram ○` quando inativa
-
-#### C — Painel de Estatísticas por Integração
-Dentro de cada tab, acima do formulário, exibir:
-- Mensagens recebidas (IN) / enviadas (OUT) nos últimos 7 dias
-- Última mensagem recebida (timestamp)
-- Status do último webhook_log
-
-Dados: query em `messages` + `webhook_logs` filtrado por `workspace_id` e `provider`.
-
-#### D — Botão "Diagnóstico Completo"
-Um único botão que executa 3 verificações em sequência com progresso visual:
-1. Testa conexão com Evolution API (`/instance/connectionState`)
-2. Verifica se webhook está registrado na Evolution (`/webhook/find/{instance}`)
-3. Envia webhook simulado e verifica se chega no banco
-
-Resultado: lista de ✅/❌ com explicação de cada passo.
-
-#### E — Campo de API Key com toggle show/hide e verificação de format
-Trocar `type="password"` puro por um input com botão 👁 para revelar parcialmente (últimos 4 chars) sem expor tudo.
-
-#### F — Logs recentes integrados na página
-Embaixo de cada formulário, mostrar os últimos 5 logs da integração (com status colorido) sem precisar ir para a aba de Logs separada.
+1.  src/contexts/AuthContext.tsx        — remove window.location.reload()
+2.  src/pages/app/Notes.tsx             — pagination + react-hook-form in modal
+3.  src/pages/app/Tasks.tsx             — pagination + react-hook-form in modal
+4.  src/pages/app/Conversations.tsx     — Realtime subscription for messages
+5.  src/components/ErrorBoundary.tsx    — NEW: class component error boundary
+6.  src/App.tsx                         — wrap routes with ErrorBoundary
+7.  package.json                        — rename to "app-dev-buddy"
+8.  supabase/functions/get-dashboard-stats/index.ts  — NEW edge function
+9.  src/pages/app/Dashboard.tsx         — replace 9 queries with 1 edge function call
+10. supabase/functions/process-message/index.ts — 8 system prompt / behavior improvements
+```
 
 ---
 
-### Arquitetura das Mudanças
+### Change details
 
-```text
-ARQUIVO A EDITAR:
-src/pages/app/Integrations.tsx
-  - Adicionar query: mensagens hoje (count IN/OUT por provider)
-  - Adicionar query: último webhook_log por provider  
-  - Adicionar query: connectionState health check (on-mount, silencioso)
-  - Novo componente <IntegrationHealthBanner>
-  - Novo componente <IntegrationStats>  
-  - Novo componente <DiagnosticModal>
-  - Novo componente <RecentLogsInline>
-  - Melhorar TabsTrigger com status badges
-  - Melhorar input de API Key com eye toggle
-  - Melhorar autoConfigureWebhook para mostrar estado atual do webhook registrado
+**1. AuthContext — remove reload**
+Line 106: Remove `setTimeout(() => window.location.reload(), 300)`.
+After `setWorkspace(ws)`, the state propagates naturally to all consumers via React context. The reload is unnecessary since `workspaceId` is already set via `setWorkspace`.
+
+**2 & 3. Notes + Tasks — Pagination**
+- Add `const PAGE_SIZE = 20` and `const [page, setPage] = useState(0)`
+- Include `page` in `queryKey: ['notes', workspaceId, page]`
+- Add `.range(page * 20, page * 20 + 19)` to the query
+- Add a "Carregar mais" button below the list — only shown when results returned === PAGE_SIZE
+- On new note/task created: reset page to 0 and invalidate
+
+**2 & 3. Notes + Tasks — react-hook-form + Zod in modals**
+
+NoteModal schema:
+```typescript
+const noteSchema = z.object({
+  title: z.string().min(1, 'Título é obrigatório'),
+  content: z.string().optional().default(''),
+  category: z.string().optional(),
+  project: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+})
 ```
 
-### O Que NÃO Muda
-- Lógica de backend (process-message, webhook-whatsapp) — nenhuma mudança
-- Banco de dados — sem novas tabelas, apenas queries de leitura
-- Formulário de configuração existente — preservado integralmente
-- Deploy de edge functions — não necessário
+TaskModal schema:
+```typescript
+const taskSchema = z.object({
+  title: z.string().min(1, 'Título é obrigatório'),
+  description: z.string().optional(),
+  status: z.enum(['todo', 'doing', 'done']).default('todo'),
+  priority: z.enum(['low', 'medium', 'high']).default('medium'),
+  due_at: z.string().optional(),
+  project: z.string().optional(),
+})
+```
 
-### Impacto Esperado
-```text
-Antes: "Será que está funcionando?" → Manda mensagem no WhatsApp → Espera resposta
-Depois: Abre Integrações → Verde/Vermelho imediato → Se vermelho, diagnóstico em 1 clique
+Replace all `useState` field state with `useForm({ resolver: zodResolver(...) })`. Use `<Form>`, `<FormField>`, `<FormItem>`, `<FormMessage>` from shadcn. Keep the existing TipTap editor for notes content via `Controller`.
+
+**4. Conversations — Realtime**
+Add `useEffect` with Supabase channel subscription:
+```typescript
+const channel = supabase.channel(`messages-${workspaceId}`)
+  .on('postgres_changes', {
+    event: 'INSERT',
+    schema: 'public',
+    table: 'messages',
+    filter: `workspace_id=eq.${workspaceId}`,
+  }, () => {
+    qc.invalidateQueries({ queryKey: ['messages', workspaceId, selectedId] })
+    qc.invalidateQueries({ queryKey: ['conversations', workspaceId] })
+  })
+  .subscribe()
+return () => { supabase.removeChannel(channel) }
+```
+Also need `useQueryClient` import.
+
+**5. ErrorBoundary component (new file)**
+```typescript
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  componentDidCatch(error, errorInfo) { ... }
+  render() {
+    if (this.state.hasError) return <FriendlyErrorScreen />
+    return this.props.children
+  }
+}
+```
+The fallback UI shows "Algo deu errado", the error message, and a "Tentar novamente" button calling `window.location.reload()`.
+
+**6. App.tsx — wrap routes**
+Import `ErrorBoundary` and wrap each page `<Route element={...}>` with `<ErrorBoundary>`. This ensures one broken page doesn't crash the whole app.
+
+**7. package.json**
+Change `"name": "vite_react_shadcn_ts"` → `"name": "app-dev-buddy"`.
+
+**8. New Edge Function: get-dashboard-stats**
+File: `supabase/functions/get-dashboard-stats/index.ts`
+
+Accepts `{ workspace_id }` in POST body. Returns in a single response:
+- `notes_today` (count)
+- `tasks_pending` (count of todo+doing)
+- `reminders_24h` (count scheduled in next 24h)
+- `messages_today` (count IN direction)
+- `notes_chart` (7-day array `[{dia, notas}]`)
+- `tasks_chart` (status distribution `[{status, total}]`)
+- `today_spend` (number, BRL)
+- `recent_notes` (last 4)
+- `recent_tasks` (last 4)
+
+All queries run with `Promise.all` inside the function. Uses `SUPABASE_SERVICE_ROLE_KEY` (already set as secret).
+
+**9. Dashboard.tsx — single edge function call**
+Replace the 9 individual `useQuery` hooks with a single one:
+```typescript
+const { data: stats, isLoading } = useQuery({
+  queryKey: ['dashboard-stats', workspaceId],
+  queryFn: async () => {
+    const { data } = await supabase.functions.invoke('get-dashboard-stats', {
+      body: { workspace_id: workspaceId }
+    })
+    return data
+  }
+})
+```
+Destructure `stats` into the same variables used in the render. Keep the same metric cards and chart components unchanged.
+
+**10. process-message/index.ts — 8 system prompt improvements**
+
+All changes are in the system prompt string and one helper function, no logic changes:
+
+a) **Time-based greeting** — compute `greetingHour` from `now` in workspace timezone, derive `saudacao` ('Bom dia'/'Boa tarde'/'Boa noite'), inject into system prompt before "## Regras de Ouro".
+
+b) **Varied confirmations** — replace rule 4 with the new multi-example rule as specified.
+
+c) **Typing indicator** — add `sendTypingIndicator()` function that calls Evolution `/chat/sendPresence/{instance}` with `composing`, called before `sendReply()` when `provider === 'EVOLUTION'`.
+
+d) **Proactive greeting behavior** — add `## Comportamento ao Receber Cumprimentos` section to system prompt.
+
+e) **Emotional empathy** — add `## Empatia e Contexto Emocional` section.
+
+f) **Single-question clarification** — replace rule 7 with the updated version (one question max, always ask time for reminders without time).
+
+g) **Contextual emoji usage** — replace rule 3 with the updated smart-emoji rule.
+
+h) **Friendly error messages** — replace all `❌ Não encontrei nenhuma nota/tarefa/lembrete...` strings in the tool handlers with the friendly versions.
+
+i) **Default bot_personality migration** — add a SQL migration updating the default value of `bot_personality` in `workspace_settings` for existing workspaces that have no personality set.
+
+---
+
+### No DB schema migrations needed
+Only a `UPDATE workspace_settings SET bot_personality = '...' WHERE bot_personality IS NULL` data update for existing records.
+
+---
+
+### Summary of impact
+```
+AuthContext:     cleaner state propagation, no full reload on auto-recovery
+Notes page:      load 20 at a time, faster initial load, form validation
+Tasks page:      load 20 at a time, form validation with inline errors
+Conversations:   messages appear in real-time without manual refresh
+ErrorBoundary:   isolated crash pages — app never goes fully blank
+Dashboard:       1 network call instead of 9 (faster, cheaper)
+process-message: smarter greetings, typing indicator, empathy, varied replies
 ```
