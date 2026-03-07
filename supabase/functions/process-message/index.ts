@@ -1217,15 +1217,34 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         replyText = `${fnArgs.reply_message}\n\n${listStr}`
       }
     } else if (fnName === 'cancel_reminder') {
-      const { data: matchingReminders } = await supabase
+      let matchingReminders: { id: string; title: string }[] | null = null
+
+      // Primary match
+      const { data: primaryReminderMatch } = await supabase
         .from('reminders')
         .select('id, title')
         .eq('workspace_id', workspace_id)
         .eq('status', 'scheduled')
         .ilike('title', `%${fnArgs.reminder_title}%`)
         .limit(1)
+      matchingReminders = primaryReminderMatch ?? []
 
-      if (matchingReminders?.length) {
+      // Fallback: try first significant word
+      if (!matchingReminders.length) {
+        const words = (fnArgs.reminder_title as string).split(' ').filter((w: string) => w.length > 3)
+        if (words.length > 0) {
+          const { data: fallbackReminderMatch } = await supabase
+            .from('reminders')
+            .select('id, title')
+            .eq('workspace_id', workspace_id)
+            .eq('status', 'scheduled')
+            .ilike('title', `%${words[0]}%`)
+            .limit(1)
+          matchingReminders = fallbackReminderMatch ?? []
+        }
+      }
+
+      if (matchingReminders.length) {
         const r = matchingReminders[0]
         const { error: cancelErr } = await supabase
           .from('reminders')
@@ -1234,7 +1253,25 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         if (cancelErr) console.error('Failed to cancel reminder:', cancelErr)
         replyText = fnArgs.reply_message ?? `✅ Lembrete "${r.title}" cancelado.`
       } else {
-        replyText = `❌ Não encontrei nenhum lembrete com o nome "${fnArgs.reminder_title}".`
+        // Not found — list available reminders
+        const { data: allReminders } = await supabase
+          .from('reminders')
+          .select('title, remind_at')
+          .eq('workspace_id', workspace_id)
+          .eq('status', 'scheduled')
+          .gte('remind_at', new Date().toISOString())
+          .order('remind_at', { ascending: true })
+          .limit(8)
+
+        if (allReminders?.length) {
+          const lista = allReminders.map((r, i) => {
+            const dt = new Date(r.remind_at).toLocaleString('pt-BR', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' })
+            return `${i + 1}. ${r.title} (${dt})`
+          }).join('\n')
+          replyText = `Não achei esse lembrete. Seus lembretes agendados:\n\n${lista}\n\nQual deles você quer cancelar?`
+        } else {
+          replyText = 'Não encontrei esse lembrete e você não tem lembretes agendados no momento.'
+        }
       }
     } else if (fnName === 'save_transcript') {
       const { error: transcriptErr } = await supabase.from('notes').insert({
@@ -1248,18 +1285,50 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       if (transcriptErr) console.error('Failed to save transcript:', transcriptErr)
       replyText = fnArgs.reply_message ?? `✅ Áudio salvo como nota: "${fnArgs.title}"`
     } else if (fnName === 'delete_note') {
-      const { data: matchingNotes } = await supabase
+      let matchingNotes: { id: string; title: string }[] | null = null
+
+      // Primary match: full phrase
+      const { data: primaryNoteMatch } = await supabase
         .from('notes')
         .select('id, title')
         .eq('workspace_id', workspace_id)
         .ilike('title', `%${fnArgs.note_title}%`)
         .limit(1)
-      if (matchingNotes?.length) {
+      matchingNotes = primaryNoteMatch ?? []
+
+      // Fallback: try first significant word
+      if (!matchingNotes.length) {
+        const words = (fnArgs.note_title as string).split(' ').filter((w: string) => w.length > 3)
+        if (words.length > 0) {
+          const { data: fallbackNoteMatch } = await supabase
+            .from('notes')
+            .select('id, title')
+            .eq('workspace_id', workspace_id)
+            .ilike('title', `%${words[0]}%`)
+            .limit(1)
+          matchingNotes = fallbackNoteMatch ?? []
+        }
+      }
+
+      if (matchingNotes.length) {
         const { error: delErr } = await supabase.from('notes').delete().eq('id', matchingNotes[0].id)
         if (delErr) console.error('Failed to delete note:', delErr)
         replyText = fnArgs.reply_message ?? `🗑️ Nota "${matchingNotes[0].title}" removida.`
       } else {
-        replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}".`
+        // Not found — list available notes
+        const { data: allNotes } = await supabase
+          .from('notes')
+          .select('title, category')
+          .eq('workspace_id', workspace_id)
+          .order('created_at', { ascending: false })
+          .limit(8)
+
+        if (allNotes?.length) {
+          const lista = allNotes.map((n, i) => `${i + 1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
+          replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
+        } else {
+          replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
+        }
       }
     } else if (fnName === 'weekly_summary') {
       const nowWk = new Date()
