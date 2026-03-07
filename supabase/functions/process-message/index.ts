@@ -971,19 +971,51 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       if (taskErr) console.error('Failed to insert task:', taskErr)
       replyText = fnArgs.reply_message ?? `✅ Tarefa criada: ${fnArgs.title}`
     } else if (fnName === 'delete_task') {
-      const { data: matchingTasks } = await supabase
+      let matchingTasks: { id: string; title: string }[] | null = null
+
+      // Primary match: full phrase
+      const { data: primaryMatch } = await supabase
         .from('tasks')
         .select('id, title')
         .eq('workspace_id', workspace_id)
         .ilike('title', `%${fnArgs.task_title}%`)
         .limit(1)
+      matchingTasks = primaryMatch ?? []
 
-      if (matchingTasks?.length) {
+      // Fallback: try matching by first significant word (>3 chars)
+      if (!matchingTasks.length) {
+        const words = (fnArgs.task_title as string).split(' ').filter((w: string) => w.length > 3)
+        if (words.length > 0) {
+          const { data: fallbackMatch } = await supabase
+            .from('tasks')
+            .select('id, title')
+            .eq('workspace_id', workspace_id)
+            .ilike('title', `%${words[0]}%`)
+            .limit(1)
+          matchingTasks = fallbackMatch ?? []
+        }
+      }
+
+      if (matchingTasks.length) {
         const { error: delErr } = await supabase.from('tasks').delete().eq('id', matchingTasks[0].id)
         if (delErr) console.error('Failed to delete task:', delErr)
         replyText = fnArgs.reply_message ?? `🗑️ Tarefa "${matchingTasks[0].title}" removida.`
       } else {
-        replyText = `❌ Não encontrei nenhuma tarefa com o nome "${fnArgs.task_title}".`
+        // Not found — list available tasks so user can pick the right one
+        const { data: allTasks } = await supabase
+          .from('tasks')
+          .select('title, status')
+          .eq('workspace_id', workspace_id)
+          .in('status', ['todo', 'doing'])
+          .order('created_at', { ascending: false })
+          .limit(8)
+
+        if (allTasks?.length) {
+          const lista = allTasks.map((t, i) => `${i + 1}. ${t.title}`).join('\n')
+          replyText = `Não encontrei uma tarefa com esse nome. Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
+        } else {
+          replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
+        }
       }
     } else if (fnName === 'set_task_priority') {
       const { data: matchingTasks } = await supabase
