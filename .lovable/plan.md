@@ -1,120 +1,119 @@
 
-## Diagnóstico: Delete já existe — problema é na experiência
 
-O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
+## Problema raiz de performance
 
-### Problemas identificados
-
-**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
-O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
-
-**2. Match parcial pode falhar em casos reais**
-A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
-
-**3. Erro "não encontrei" não ajuda o usuário**
-Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
-
-**4. Sem confirmação antes de deletar**
-A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
-
-**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
-
----
-
-### O que será feito
-
-**Arquivo:** `supabase/functions/process-message/index.ts`
-
-**A — Adicionar seção explícita no system prompt para deleção**
-Antes das "Regras de Ouro", adicionar:
-
+**Pipeline atual para áudio:**
 ```
-## Exclusão de Itens — OBRIGATÓRIO
-Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
-- Tarefa → use delete_task com o título completo ou parte do título
-- Nota → use delete_note com o título
-- Lembrete → use cancel_reminder
-
-Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
-"não preciso mais de", "cancela", "remove", "zera", "descarta"
-
-ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
-para o usuário escolher — não retorne erro vazio.
+Boot (~30ms) → Contexto DB (~150ms) → Transcrição [gemini-2.5-pro] (~5-6s) → AI principal [gemini-2.5-pro] (~5s) → Salvar + Enviar (~400ms)
+= ~13 segundos
 ```
 
-**B — Melhorar o handler `delete_task` quando não encontra**
-Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
+**Causa:** `isComplexRequest()` retorna `true` para qualquer `msgType === 'audio'` (linha 55), então SEMPRE usa Pro em ambas as chamadas. Mas "apaga tarefa X" transcrito é tão simples quanto texto.
 
-```typescript
-// Quando não encontra: lista as tarefas disponíveis
-const { data: allTasks } = await supabase
-  .from('tasks')
-  .select('title, status')
-  .eq('workspace_id', workspace_id)
-  .in('status', ['todo', 'doing'])
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allTasks?.length) {
-  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
-  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
-} else {
-  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
-}
+**Pipeline depois das correções:**
 ```
-
-**C — Mesma melhoria para `delete_note`**
-Quando não encontrar a nota, listar as notas recentes:
-
-```typescript
-const { data: allNotes } = await supabase
-  .from('notes')
-  .select('title, category')
-  .eq('workspace_id', workspace_id)
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allNotes?.length) {
-  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
-  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
-} else {
-  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
-}
-```
-
-**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
-Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
-
-**E — Melhorar o match com busca por palavras individuais**
-Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
-
-```typescript
-// Fallback: tenta match por primeira palavra significativa
-if (!matchingTasks?.length) {
-  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
-  if (words.length > 0) {
-    const { data: fallbackTasks } = await supabase
-      .from('tasks')
-      .select('id, title')
-      .eq('workspace_id', workspace_id)
-      .ilike('title', `%${words[0]}%`)
-      .limit(1)
-    // use fallbackTasks if found
-  }
-}
+Boot → Contexto DB → Transcrição [gemini-2.5-flash] (~1-2s) → AI principal [flash, quando simples] (~1-2s) → Enviar (~400ms)
+= ~3-5 segundos
 ```
 
 ---
 
-### Resumo dos arquivos
+## Arquivo: `supabase/functions/process-message/index.ts`
+
+### Mudança A — Transcrição usa Flash primeiro
+
+**Linha 308:**
+```typescript
+// ANTES
+for (const model of ['google/gemini-2.5-pro', 'google/gemini-2.5-flash']) {
+
+// DEPOIS  
+for (const model of ['google/gemini-2.5-flash', 'google/gemini-2.5-pro']) {
+```
+
+Flash transcreve português com a mesma qualidade. Pro como fallback se Flash falhar.
+Economia: **~3-4 segundos por áudio**.
+
+---
+
+### Mudança B — Roteamento pós-transcrição mais inteligente
+
+**Linha 820 (atual):**
+```typescript
+const isComplex = isComplexRequest(effectiveText ?? '', message_type)
+```
+
+**Novo (depois da transcrição):**
+```typescript
+// Para áudio: usa o TEXTO transcrito para avaliar complexidade,
+// não o tipo 'audio'. "Remover tarefa X" transcrito → rota para flash.
+const routingType = message_type === 'audio' ? 'text' : message_type
+const isComplex = isComplexRequest(effectiveText ?? '', routingType)
+```
+
+Comandos simples de áudio (criar nota, apagar tarefa, criar lembrete) → Flash.
+Comandos complexos de áudio (resumo semanal, análise financeira) → Pro.
+Economia: **~3-4 segundos para comandos simples de áudio**.
+
+---
+
+### Mudança C — Precarregar integration em paralelo com o contexto
+
+Atualmente `sendReply` faz uma nova query ao banco toda vez (sequential, depois do AI call). 
+
+Adicionar no `Promise.all` da linha 198:
+```typescript
+supabase.from('integrations')
+  .select('*')
+  .eq('workspace_id', workspace_id)
+  .eq('is_active', true)
+  .maybeSingle()
+```
+
+Passar `integration` para `sendReply` como parâmetro. Elimina uma round-trip serial ao banco.
+Economia: **~100-200ms**.
+
+---
+
+### Mudança D — Skip da query financeira para mensagens sem contexto financeiro
+
+A 5ª query em paralelo (`todayFinancialNotes`) roda para TODA mensagem, mesmo "oi" ou "apaga tarefa".
+
+```typescript
+// Só faz query financeira se a mensagem tem contexto financeiro
+const needsFinancial = hasFinancialContent(effectiveText ?? '') || message_type === 'audio'
+
+// No Promise.all:
+needsFinancial 
+  ? supabase.from('notes').select('title, content').eq('workspace_id', workspace_id)...
+  : Promise.resolve({ data: [] })
+```
+
+Para mensagens de texto simples (maioria das mensagens), elimina uma query. Economia: **~50-100ms**.
+
+---
+
+### Mudança E — Reduzir tamanho do contexto no system prompt para pedidos simples
+
+Para `isComplex === false` (texto simples), reduzir:
+- `recentNotes`: de `.limit(15)` → `.limit(6)`
+- `pendingTasks`: de `.limit(10)` → `.limit(6)`
+- `history`: de `.limit(12)` → `.limit(8)`
+
+Context menor = menos tokens = resposta mais rápida do modelo. Economia: **~200-500ms**.
+
+---
+
+## Resumo do impacto esperado
 
 ```
-MOD  supabase/functions/process-message/index.ts
-  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
-  B — handler delete_task: quando não encontra, lista tarefas disponíveis
-  C — handler delete_note: quando não encontra, lista notas recentes  
-  D — system prompt: instrução "excluir lembrete = cancel_reminder"
-  E — handlers delete_task + delete_note: fallback de busca por palavra individual
+               ANTES       DEPOIS
+─────────────────────────────────
+Texto simples: ~3-4s    → ~1.5-2s
+Áudio simples: ~13s     → ~3-5s
+Áudio complexo: ~13s    → ~6-8s (ainda usa Pro, mas só transcr. usa flash)
 ```
 
-Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
+Arquivo único alterado: `supabase/functions/process-message/index.ts`
+Zero mudanças de banco de dados. Deploy automático.
+
