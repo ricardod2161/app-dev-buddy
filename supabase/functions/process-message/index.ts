@@ -19,7 +19,6 @@ interface ProcessMessageBody {
 
 // ── Financial helpers ──────────────────────────────────────────────────────────
 function extractFinancialValues(text: string): { items: { name: string; value: number }[]; total: number } {
-  // Match patterns like "20 reais", "R$15,50", "R$ 200", "15.00 reais", etc.
   const patterns = [
     /(?:R\$\s*)([\d]+(?:[.,]\d{1,2})?)/gi,
     /([\d]+(?:[.,]\d{1,2})?)\s*(?:reais|real|R\$)/gi,
@@ -49,6 +48,12 @@ function normalizeFinancialCategory(cat: string | null): boolean {
   if (!cat) return false
   const lower = cat.toLowerCase()
   return lower.includes('financ') || lower.includes('gasto') || lower.includes('compra') || lower === 'despesa' || lower.includes('despesa')
+}
+
+// ── Detect if message is complex (needs a smarter model) ──────────────────────
+function isComplexRequest(text: string, msgType: string): boolean {
+  if (msgType === 'audio' || msgType === 'image') return true
+  return /resumo|semanal|semana|relat[oó]rio|financ|gastos do m[eê]s|análise|analise|produtividade|quanto gastei|total de/i.test(text)
 }
 
 Deno.serve(async (req) => {
@@ -101,13 +106,16 @@ Deno.serve(async (req) => {
       const helpText = `🤖 *${botN} — Lista de Comandos*\n\n` +
         `📝 *NOTAS*\n` +
         `• "Anota que..." → salva uma nota\n` +
+        `• "Edita nota [título]" → atualiza conteúdo de uma nota\n` +
         `• "Minhas notas" / "Lista notas" → ver notas recentes\n` +
         `• "Busca [palavra]" → encontrar notas por texto\n` +
         `• "Apaga a nota [título]" → remover nota\n\n` +
         `✅ *TAREFAS*\n` +
         `• "Cria tarefa: [título]" → nova tarefa\n` +
         `• "Minhas tarefas" / "Lista tarefas" → tarefas em aberto\n` +
-        `• "Concluí [tarefa]" / "Finalizei [tarefa]" → marcar como feita\n\n` +
+        `• "Concluí [tarefa]" / "Finalizei [tarefa]" → marcar como feita\n` +
+        `• "Apaga tarefa [título]" → remover tarefa\n` +
+        `• "Tarefa [título] é urgente" → muda prioridade\n\n` +
         `⏰ *LEMBRETES*\n` +
         `• "Me lembra de [X] às [hora]" → criar lembrete\n` +
         `• "Meus lembretes" → ver próximos lembretes\n` +
@@ -116,6 +124,8 @@ Deno.serve(async (req) => {
         `• "Gastei R$X de [item]" → registra gasto\n` +
         `• "Gastos de hoje" / "do mês" → relatório financeiro\n` +
         `• "Resumo semanal" → resumo da semana\n\n` +
+        `👤 *CONTATOS*\n` +
+        `• "Salva contato [nome] [telefone]" → adiciona contato\n\n` +
         `🎤 *ÁUDIO*\n` +
         `• Envie um áudio → o bot transcreve, interpreta e age\n` +
         `• "Responde em áudio" / "Manda áudio" → resposta em voz\n\n` +
@@ -124,7 +134,6 @@ Deno.serve(async (req) => {
         `• "Gastos do mês" → total financeiro detalhado\n\n` +
         `💡 _Você pode falar naturalmente! Não precisa usar comandos exatos._`
 
-      // Save to messages & send
       await supabase.from('messages').insert({
         workspace_id, conversation_id, direction: 'OUT', type: 'text',
         body_text: helpText, timestamp: new Date().toISOString(),
@@ -162,7 +171,8 @@ Deno.serve(async (req) => {
     const contactNotes = contactRow?.notes ?? null
 
     // ── Date/time awareness ──────────────────────────────────────────────────
-    const nowStr = new Date().toLocaleString('pt-BR', {
+    const now = new Date()
+    const nowStr = now.toLocaleString('pt-BR', {
       timeZone: tz,
       weekday: 'long',
       year: 'numeric',
@@ -171,6 +181,8 @@ Deno.serve(async (req) => {
       hour: '2-digit',
       minute: '2-digit',
     })
+    // Short date for deduplication hints
+    const todayShort = now.toLocaleDateString('pt-BR', { timeZone: tz, day: '2-digit', month: '2-digit', year: 'numeric' })
 
     const formatInstruction =
       responseFormat === 'curto'
@@ -190,28 +202,28 @@ Deno.serve(async (req) => {
       { data: upcomingReminders },
       { data: todayFinancialNotes },
     ] = await Promise.all([
-      // conversation history
+      // conversation history — last 12 messages
       supabase
         .from('messages')
         .select('direction, body_text, type, created_at')
         .eq('conversation_id', conversation_id)
         .order('created_at', { ascending: false })
         .limit(12),
-      // recent notes (title + category + snippet)
+      // recent notes — expanded to 15 to improve deduplication awareness
       supabase
         .from('notes')
         .select('id, title, category, content, created_at')
         .eq('workspace_id', workspace_id)
         .order('created_at', { ascending: false })
-        .limit(8),
-      // pending tasks with due dates
+        .limit(15),
+      // pending tasks — FIX: use 'doing' not 'in_progress'
       supabase
         .from('tasks')
         .select('id, title, status, priority, due_at')
         .eq('workspace_id', workspace_id)
-        .in('status', ['todo', 'in_progress'])
+        .in('status', ['todo', 'doing'])
         .order('due_at', { ascending: true, nullsFirst: false })
-        .limit(8),
+        .limit(10),
       // upcoming reminders
       supabase
         .from('reminders')
@@ -221,7 +233,7 @@ Deno.serve(async (req) => {
         .gte('remind_at', new Date().toISOString())
         .order('remind_at', { ascending: true })
         .limit(5),
-      // today's financial notes (dual-query for context total)
+      // today's financial notes for spend total
       supabase
         .from('notes')
         .select('title, content')
@@ -232,7 +244,7 @@ Deno.serve(async (req) => {
 
     const history = (historyRows ?? []).reverse()
 
-    // Compute today's spend total from financial notes (deduplicated by title)
+    // Compute today's spend total (deduplicated by title)
     let todaySpendTotal = 0
     const seenTitlesForSpend = new Set<string>()
     for (const fn of todayFinancialNotes ?? []) {
@@ -248,7 +260,6 @@ Deno.serve(async (req) => {
     let effectiveText = message_text
     let mediaInlineData: { mime_type: string; data: string } | null = null
 
-    // Normalize MIME types — Evolution API sometimes returns field names instead of real MIME types
     function normalizeMime(rawMime: string | null | undefined, msgType: string): string {
       if (!rawMime) {
         if (msgType === 'audio') return 'audio/ogg'
@@ -257,12 +268,10 @@ Deno.serve(async (req) => {
         return 'application/octet-stream'
       }
       const lower = rawMime.toLowerCase()
-      // Evolution returns field names like "audioMessage", "imageMessage", etc.
       if (lower === 'audiomessage' || lower === 'audio' || lower.includes('ogg') || lower.includes('opus')) return 'audio/ogg'
       if (lower === 'imagemessage' || lower === 'image') return 'image/jpeg'
       if (lower === 'videomessage' || lower === 'video') return 'video/mp4'
       if (lower === 'documentmessage' || lower === 'document') return 'application/octet-stream'
-      // If it already looks like a proper MIME type (contains '/'), keep it
       if (rawMime.includes('/')) return rawMime
       return 'application/octet-stream'
     }
@@ -277,37 +286,25 @@ Deno.serve(async (req) => {
           const bytes = new Uint8Array(buffer)
           let binary = ''
           for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-          mediaInlineData = {
-            mime_type: resolvedMime,
-            data: btoa(binary),
-          }
+          mediaInlineData = { mime_type: resolvedMime, data: btoa(binary) }
         }
       } catch (e) {
         console.error('Failed to fetch media:', e)
       }
     } else if (media_base64) {
-      mediaInlineData = {
-        mime_type: resolvedMime,
-        data: media_base64,
-      }
+      mediaInlineData = { mime_type: resolvedMime, data: media_base64 }
     }
 
     // ── 4. Transcribe audio ──────────────────────────────────────────────────
-    // The Lovable AI gateway only supports 'text' and 'image_url' content types.
-    // Gemini models accept audio via data URI in the image_url field (e.g. data:audio/ogg;base64,...).
-    // 'input_audio' is NOT supported by the gateway and will always return 400.
     if (message_type === 'audio' && mediaInlineData) {
       console.log('Audio transcription starting:', {
         hasBase64: !!mediaInlineData.data,
         base64Length: mediaInlineData.data?.length ?? 0,
         mimeType: mediaInlineData.mime_type,
-        mediaUrlPresent: !!media_url,
       })
 
       let transcribed = false
 
-      // Primary: Gemini 2.5 Pro via image_url with audio data URI
-      // Gemini natively handles audio/ogg, audio/mp4, audio/mpeg etc via data URIs
       for (const model of ['google/gemini-2.5-pro', 'google/gemini-2.5-flash']) {
         if (transcribed) break
         try {
@@ -325,9 +322,7 @@ Deno.serve(async (req) => {
                   },
                   {
                     type: 'image_url',
-                    image_url: {
-                      url: `data:${mediaInlineData.mime_type};base64,${mediaInlineData.data}`,
-                    },
+                    image_url: { url: `data:${mediaInlineData.mime_type};base64,${mediaInlineData.data}` },
                   },
                 ],
               }],
@@ -341,8 +336,6 @@ Deno.serve(async (req) => {
               effectiveText = `[Áudio transcrito]: ${transcription}`
               transcribed = true
               console.log(`Audio transcribed (${model}):`, transcription.slice(0, 150))
-            } else {
-              console.warn(`${model} returned empty transcription:`, JSON.stringify(transcribeData).slice(0, 200))
             }
           } else {
             const errBody = await transcribeRes.text()
@@ -354,7 +347,6 @@ Deno.serve(async (req) => {
       }
 
       if (!transcribed) {
-        console.error('All transcription attempts failed')
         effectiveText = '[Áudio recebido mas não foi possível transcrever automaticamente. Por favor, reenvie o áudio ou escreva a mensagem em texto.]'
       }
     }
@@ -371,15 +363,25 @@ Deno.serve(async (req) => {
     }
 
     // ── 5. Build rich context for system prompt ───────────────────────────────
+    // Include snippets of today's notes to help with deduplication
+    const todayNotesTitles = (recentNotes ?? [])
+      .filter(n => n.created_at && new Date(n.created_at) >= todayStart)
+      .map(n => `"${n.title}"`)
+      .join(', ')
+
     const notesContext = recentNotes?.length
-      ? recentNotes.map((n) => `• "${n.title}" (${n.category ?? 'Geral'})`).join('\n')
+      ? recentNotes.map((n) => {
+          const snippet = n.content ? ` — "${n.content.replace(/<[^>]+>/g, '').slice(0, 60)}"` : ''
+          return `• "${n.title}" (${n.category ?? 'Geral'})${snippet}`
+        }).join('\n')
       : 'Nenhuma nota ainda.'
 
     const tasksContext = pendingTasks?.length
       ? pendingTasks.map((t) => {
           const prioLabel = t.priority === 'high' ? '🔴' : t.priority === 'low' ? '🟢' : '🟡'
+          const statusLabel = t.status === 'doing' ? ' [em andamento]' : ''
           const due = t.due_at ? ` — vence ${new Date(t.due_at).toLocaleDateString('pt-BR')}` : ''
-          return `• ${prioLabel} "${t.title}"${due}`
+          return `• ${prioLabel} "${t.title}"${statusLabel}${due}`
         }).join('\n')
       : 'Nenhuma tarefa pendente.'
 
@@ -388,72 +390,79 @@ Deno.serve(async (req) => {
       : 'Nenhum lembrete agendado.'
 
     const financialContext = todaySpendTotal > 0
-      ? `\n💰 Gastos registrados hoje: ${formatCurrency(todaySpendTotal)}`
+      ? `\n💰 Gastos registrados hoje (${todayShort}): ${formatCurrency(todaySpendTotal)}`
       : ''
 
-    // Contact context for prompt
     const contactContext = contactName
       ? `\n## Usuário\nO usuário se chama **${contactName}**.${contactNotes ? ` Observações: ${contactNotes}` : ''} Use o nome dele nas respostas de forma natural.`
       : ''
 
-    // ── 6. Build system prompt (elite) ───────────────────────────────────────
+    // ── 6. Build system prompt ────────────────────────────────────────────────
     const systemPrompt = `Você é **${botName}**, o assistente pessoal mais inteligente e útil do mundo, integrado diretamente ao WhatsApp/Telegram do usuário.
 
-📅 Data e hora atual: ${nowStr}
+📅 Data e hora atual: ${nowStr} (${todayShort})
 ${contactContext}
 ## Sua Missão
 Ajudar o usuário a organizar sua vida com máxima eficiência. Você é proativo, contextual e sempre sugere a ação mais útil. Você tem memória completa desta conversa.
 
 ## Capacidades Disponíveis
-- **Notas**: criar, buscar por palavra-chave, listar por categoria
-- **Tarefas**: criar, marcar como concluída/em andamento, listar pendentes
-- **Lembretes**: criar (sempre extraia data/hora precisa), listar próximos, cancelar
-- **Finanças**: registrar gastos com categoria "Financeiro", calcular totais do dia/semana/mês
+- **Notas**: criar, editar, buscar, listar, deletar
+- **Tarefas**: criar, atualizar status (todo/doing/done), mudar prioridade, deletar
+- **Lembretes**: criar (sempre extraia data/hora precisa), listar, cancelar
+- **Finanças**: registrar gastos com category="Financeiro", calcular totais do dia/semana/mês
+- **Contatos**: salvar novas pessoas com nome e telefone
 - **Respostas**: conversar, responder perguntas, dar conselhos
 
+## ⚠️ REGRA ANTI-DUPLICATA — OBRIGATÓRIA
+Antes de criar uma nota ou tarefa, VERIFIQUE se já existe um item similar HOJE (${todayShort}).
+Notas criadas hoje: ${todayNotesTitles || 'nenhuma ainda'}.
+→ Se já existe uma nota com título IGUAL ou MUITO similar criada hoje → use **update_note** para adicionar o novo valor/conteúdo, NÃO crie duplicata.
+→ Só use create_note se o título for genuinamente diferente de todos os itens acima.
+
 ## Inteligência Financeira 💰
-Quando o usuário mencionar valores monetários (ex: "gastei 20 reais de lanche", "R$50 de gasolina", "rapadura 3 reais", "uma rapadura e um doce 15 reais"):
+Quando o usuário mencionar valores monetários (ex: "gastei 20 reais de lanche", "R$50 de gasolina"):
 → Use **create_note** com category="Financeiro" SEMPRE
-→ Extraia cada item e valor no conteúdo de forma estruturada: "• Item: R$valor"
-→ Confirme com emoji: "✅ Gasto registrado: [itens] - Total: R$xx,xx"
-→ Se mencionou vários itens num valor só, distribua igualmente ou coloque o total
+→ VERIFIQUE anti-duplicata antes: se já existe "Gasto com Almoço" hoje, use update_note
+→ Extraia cada item e valor no conteúdo: "• Item: R$valor"
+→ Confirme: "✅ Gasto registrado: [item] — R$xx,xx"
+
+## Status de Tarefas — VALORES EXATOS
+- "todo" = a fazer (pendente)
+- "doing" = em andamento (não use "in_progress", use "doing")  
+- "done" = concluído
 
 ## Contexto Atual do Usuário
-**Notas recentes (${recentNotes?.length ?? 0} total):**
+**Notas recentes (${recentNotes?.length ?? 0} — últimas 15):**
 ${notesContext}
 
-**Tarefas em aberto (${pendingTasks?.length ?? 0}):**
+**Tarefas em aberto (${pendingTasks?.length ?? 0} — todo + doing):**
 ${tasksContext}
 
 **Próximos lembretes (${upcomingReminders?.length ?? 0}):**
 ${remindersContext}${financialContext}
 
 ## Tratamento de Áudio 🎤
-${message_type === 'audio' ? `A mensagem atual é um ÁUDIO transcrito. Siga obrigatoriamente estas regras:
-- Se o áudio for um COMANDO direto (ex: "anota que...", "cria tarefa de...", "me lembra...", "gastei...") → execute o comando correspondente
-- Se o áudio for CONTEÚDO para salvar (reflexão, ideia, relato, plano, pensamento falado) → use save_transcript para salvar e confirmar com resumo
-- Se o áudio for uma PERGUNTA ou conversa casual → responda normalmente com just_reply
-- ⛔ NUNCA use just_reply para áudios com conteúdo substancial (>3 frases) sem oferecer uma ação
-- Para áudios longos: crie título descritivo e salve o conteúdo completo` : ''}
-${message_type === 'image' ? '📷 Imagem — descreva o que vê e sugira ação útil (criar nota, tarefa, etc.)' : ''}
-${message_type === 'document' ? '📄 Documento — resuma o conteúdo se possível e ofereça salvá-lo como nota' : ''}
+${message_type === 'audio' ? `A mensagem atual é um ÁUDIO transcrito. Regras obrigatórias:
+- COMANDO direto (ex: "anota que...", "cria tarefa de...", "me lembra...", "gastei...") → execute o comando
+- CONTEÚDO para salvar (reflexão, ideia, relato, plano) → use save_transcript
+- PERGUNTA ou conversa casual → responda com just_reply
+- ⛔ NUNCA use just_reply para áudios com conteúdo substancial (>3 frases) sem oferecer ação
+- Áudios longos: crie título descritivo e salve o conteúdo completo` : ''}
+${message_type === 'image' ? '📷 Imagem — descreva o que vê e sugira ação útil' : ''}
+${message_type === 'document' ? '📄 Documento — resuma o conteúdo e ofereça salvar como nota' : ''}
 ${message_type === 'text' ? '💬 Mensagem de texto' : ''}
-
-## Inteligência Financeira — Palavras-Chave 💰
-Palavras que SEMPRE indicam gasto financeiro e exigem create_note com category="Financeiro":
-"gastei", "comprei", "paguei", "custou", "vale", "valeu", "custa", "quanto fica", "me cobrou", "R$", "reais", "dinheiro", "gasto de", "compra de"
-Exemplos: "gastei 15 reais de lanche" → create_note category=Financeiro | "comprei uma rapadura 3 reais" → create_note category=Financeiro
 
 ## Regras de Ouro
 1. ${formatInstruction}
 2. Responda SEMPRE em português brasileiro
-3. Use emojis com moderação (1-2 por mensagem, apenas quando natural)
-4. Ao confirmar ações: "✅ [ação] criada/concluída: [nome]"
+3. Use emojis com moderação (1-2 por mensagem)
+4. Ao confirmar ações: "✅ [ação] criada/atualizada: [nome]"
 5. Seja proativo: detecte padrões, sugira ações complementares
-6. Para lembretes: extraia data/hora precisa e use ISO 8601 no campo remind_at (use ${new Date().getFullYear()} como ano base)
+6. Para lembretes: extraia data/hora precisa e use ISO 8601 (ano base ${now.getFullYear()})
 7. Se ambíguo, pergunte de forma gentil e direta
 8. Use negrito (*texto*) para destacar itens importantes
 9. ⛔ NUNCA ignore áudio com conteúdo — sempre ofereça salvar ou registrar
+10. ⛔ category da nota NUNCA deve ser "Finanças" — SEMPRE use "Financeiro"
 ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
     // ── 7. Build conversation history ─────────────────────────────────────────
@@ -466,11 +475,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       })
     }
 
-    // Build current user message (potentially multimodal)
     type ContentPart =
       | { type: 'text'; text: string }
       | { type: 'image_url'; image_url: { url: string } }
-      | { type: 'input_audio'; input_audio: { mime_type: string; data: string } }
 
     let userContent: string | ContentPart[]
     if (message_type === 'image' && mediaInlineData) {
@@ -482,36 +489,42 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       userContent = effectiveText ?? ''
     }
 
-    // ── 8. Call AI with expanded toolset + failover ───────────────────────────
-    const aiMessages = [
-      { role: 'system', content: systemPrompt },
-      ...conversationMessages,
-      { role: 'user', content: userContent },
-    ]
-
-    // Models to try in order — gemini-3-flash-preview first (fastest), then fallbacks
-    const AI_MODELS = [
-      'google/gemini-3-flash-preview',
-      'google/gemini-2.5-flash',
-      'openai/gpt-5-mini',
-    ]
-
+    // ── 8. Tool definitions ───────────────────────────────────────────────────
     const toolDefinitions = [
       {
         type: 'function',
         function: {
           name: 'create_note',
-          description: 'Cria uma nota/anotação. Use também para registrar gastos financeiros (category="Financeiro").',
+          description: 'Cria uma NOVA nota. Antes de usar, verifique se já existe uma nota similar hoje (use update_note se sim). Para gastos financeiros use category="Financeiro".',
           parameters: {
             type: 'object',
             properties: {
               title: { type: 'string', description: 'Título curto e descritivo' },
               content: { type: 'string', description: 'Conteúdo completo. Para gastos: liste cada item com valor.' },
-              category: { type: 'string', description: 'Categoria: Trabalho, Pessoal, Ideia, Reunião, Financeiro, Saúde, Compras, etc.' },
+              category: { type: 'string', description: 'Categoria: Trabalho, Pessoal, Ideia, Reunião, Financeiro, Saúde, Compras — NUNCA "Finanças"' },
               tags: { type: 'array', items: { type: 'string' }, description: 'Tags opcionais' },
               reply_message: { type: 'string', description: 'Confirmação amigável para o usuário' },
             },
             required: ['title', 'content', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'update_note',
+          description: 'Edita/atualiza uma nota existente pelo título. Use quando o usuário quer corrigir, adicionar informação ou adicionar mais um gasto ao mesmo título do dia.',
+          parameters: {
+            type: 'object',
+            properties: {
+              note_title: { type: 'string', description: 'Título ou parte do título da nota a ser atualizada' },
+              new_content: { type: 'string', description: 'Novo conteúdo completo da nota (substitui o antigo)' },
+              append_content: { type: 'string', description: 'Conteúdo a ADICIONAR ao final da nota existente (use quando quiser acrescentar sem perder o que já estava)' },
+              new_category: { type: 'string', description: 'Nova categoria (opcional, só se precisar mudar)' },
+              reply_message: { type: 'string', description: 'Confirmação amigável' },
+            },
+            required: ['note_title', 'reply_message'],
             additionalProperties: false,
           },
         },
@@ -538,6 +551,39 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       {
         type: 'function',
         function: {
+          name: 'delete_task',
+          description: 'Remove/deleta uma tarefa existente pelo título.',
+          parameters: {
+            type: 'object',
+            properties: {
+              task_title: { type: 'string', description: 'Título ou parte do título da tarefa a ser removida' },
+              reply_message: { type: 'string', description: 'Confirmação amigável após deletar' },
+            },
+            required: ['task_title', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'set_task_priority',
+          description: 'Muda a prioridade de uma tarefa existente.',
+          parameters: {
+            type: 'object',
+            properties: {
+              task_title: { type: 'string', description: 'Título ou parte do título da tarefa' },
+              priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Nova prioridade' },
+              reply_message: { type: 'string', description: 'Confirmação amigável' },
+            },
+            required: ['task_title', 'priority', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
           name: 'create_reminder',
           description: 'Cria um lembrete para notificar o usuário em data/hora específica.',
           parameters: {
@@ -557,15 +603,33 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         type: 'function',
         function: {
           name: 'update_task_status',
-          description: 'Marca uma tarefa como concluída, em andamento ou a fazer.',
+          description: 'Marca uma tarefa como concluída, em andamento ou a fazer. Valores válidos: "todo", "doing", "done".',
           parameters: {
             type: 'object',
             properties: {
               task_title: { type: 'string', description: 'Título ou parte do título da tarefa para localizar' },
-              new_status: { type: 'string', enum: ['todo', 'in_progress', 'done'], description: 'Novo status' },
+              new_status: { type: 'string', enum: ['todo', 'doing', 'done'], description: 'Novo status: todo=a fazer, doing=em andamento, done=concluída' },
               reply_message: { type: 'string', description: 'Confirmação amigável' },
             },
             required: ['task_title', 'new_status', 'reply_message'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'create_contact',
+          description: 'Salva uma nova pessoa na lista de contatos com nome e telefone.',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Nome completo do contato' },
+              phone: { type: 'string', description: 'Número de telefone no formato E.164 (ex: +5511999998888)' },
+              notes: { type: 'string', description: 'Observações sobre o contato (opcional)' },
+              reply_message: { type: 'string', description: 'Confirmação amigável' },
+            },
+            required: ['name', 'phone', 'reply_message'],
             additionalProperties: false,
           },
         },
@@ -623,11 +687,11 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         type: 'function',
         function: {
           name: 'list_tasks',
-          description: 'Lista tarefas pendentes ou concluídas do usuário.',
+          description: 'Lista tarefas do usuário.',
           parameters: {
             type: 'object',
             properties: {
-              status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'pending'], description: 'Filtrar por status (opcional)' },
+              status: { type: 'string', enum: ['todo', 'doing', 'done', 'pending'], description: 'Filtrar por status. "pending" = todo+doing' },
               reply_message: { type: 'string', description: 'Resumo formatado' },
             },
             required: ['reply_message'],
@@ -733,7 +797,20 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       },
     ]
 
-    // ── AI call with model failover ───────────────────────────────────────────
+    // ── 9. AI call — smart model routing + failover ───────────────────────────
+    // Complex requests (audio, summaries, financial analysis) → pro model first
+    // Simple text requests → flash first (faster + cheaper)
+    const isComplex = isComplexRequest(effectiveText ?? '', message_type)
+    const AI_MODELS = isComplex
+      ? ['google/gemini-2.5-pro', 'google/gemini-3-flash-preview', 'google/gemini-2.5-flash']
+      : ['google/gemini-3-flash-preview', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro']
+
+    const aiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...conversationMessages,
+      { role: 'user', content: userContent },
+    ]
+
     let fnName = 'just_reply'
     let fnArgs: Record<string, unknown> = { message: 'Olá! Como posso ajudar? 😊' }
     let aiCallSuccess = false
@@ -741,7 +818,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     for (const model of AI_MODELS) {
       if (aiCallSuccess) break
       try {
-        console.log(`[AI] Trying model: ${model}`)
+        console.log(`[AI] Trying model: ${model} (complex=${isComplex})`)
         const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
@@ -756,7 +833,6 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         if (!aiResponse.ok) {
           const errText = await aiResponse.text()
           console.warn(`[AI] Model ${model} failed: HTTP ${aiResponse.status} — ${errText.slice(0, 200)}`)
-          // Don't retry on payment/quota errors
           if (aiResponse.status === 429 || aiResponse.status === 402) {
             const fallback = aiResponse.status === 429
               ? '⚠️ Estou sobrecarregada no momento. Tente novamente em alguns segundos!'
@@ -765,14 +841,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: fallback })
             return new Response(JSON.stringify({ ok: false, error: aiResponse.status === 429 ? 'rate_limited' : 'payment_required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
           }
-          continue // Try next model
+          continue
         }
 
         const aiData = await aiResponse.json()
         const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0]
 
         if (!toolCall) {
-          // No tool call — use content as just_reply
           const rawContent = aiData.choices?.[0]?.message?.content
           console.warn(`[AI] Model ${model} returned no tool_call — using content as reply`)
           fnName = 'just_reply'
@@ -786,16 +861,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             console.log(`[AI] Model ${model} → tool=${fnName}`)
           } catch (parseErr) {
             console.error(`[AI] Model ${model} returned unparseable args:`, toolCall.function.arguments?.slice(0, 200))
-            // Try next model
           }
         }
       } catch (fetchErr) {
         console.error(`[AI] Model ${model} fetch exception:`, fetchErr)
-        // Try next model
       }
     }
 
-    // If all models failed, send a helpful fallback
     if (!aiCallSuccess) {
       const fallback = '😔 Não consegui processar sua mensagem agora. Tente novamente em instantes!'
       await supabase.from('messages').insert({ workspace_id, conversation_id, direction: 'OUT', type: 'text', body_text: fallback, timestamp: new Date().toISOString() })
@@ -805,9 +877,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
     let replyText = ''
 
-    // ── 9. Execute chosen action ──────────────────────────────────────────────
+    // ── 10. Execute chosen action ─────────────────────────────────────────────
     if (fnName === 'create_note') {
-      // Auto-detect financial content — use normalizeFinancialCategory + keyword scan
+      // FIX: Always normalize category — never allow "Finanças", always "Financeiro"
       const isFinancial = normalizeFinancialCategory(fnArgs.category) || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
       const finalCategory = isFinancial ? 'Financeiro' : (fnArgs.category ?? 'Geral')
 
@@ -821,7 +893,6 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       })
       if (noteErr) console.error('Failed to insert note:', noteErr)
 
-      // If financial, compute and include total in reply
       if (isFinancial) {
         const fin = extractFinancialValues(`${fnArgs.title} ${fnArgs.content}`)
         const totalStr = fin.total > 0 ? ` (total: ${formatCurrency(fin.total)})` : ''
@@ -830,6 +901,46 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
           : `✅ Gasto registrado: ${fnArgs.title}${totalStr}`
       } else {
         replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
+      }
+    } else if (fnName === 'update_note') {
+      // Find note by fuzzy title match
+      const { data: matchingNotes } = await supabase
+        .from('notes')
+        .select('id, title, content')
+        .eq('workspace_id', workspace_id)
+        .ilike('title', `%${fnArgs.note_title}%`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (matchingNotes?.length) {
+        const note = matchingNotes[0]
+        let updatedContent: string
+
+        if (fnArgs.append_content) {
+          // Append mode: add to existing content
+          updatedContent = `${note.content ?? ''}\n${fnArgs.append_content}`.trim()
+        } else if (fnArgs.new_content) {
+          // Replace mode
+          updatedContent = fnArgs.new_content as string
+        } else {
+          updatedContent = note.content ?? ''
+        }
+
+        const updatePayload: Record<string, unknown> = { content: updatedContent }
+        if (fnArgs.new_category) {
+          // Also normalize category on update
+          const isFinCat = normalizeFinancialCategory(fnArgs.new_category as string)
+          updatePayload.category = isFinCat ? 'Financeiro' : fnArgs.new_category
+        }
+
+        const { error: updateErr } = await supabase
+          .from('notes')
+          .update(updatePayload)
+          .eq('id', note.id)
+        if (updateErr) console.error('Failed to update note:', updateErr)
+        replyText = fnArgs.reply_message ?? `✅ Nota "${note.title}" atualizada.`
+      } else {
+        replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}". Verifique o nome e tente novamente.`
       }
     } else if (fnName === 'create_task') {
       const { error: taskErr } = await supabase.from('tasks').insert({
@@ -842,6 +953,40 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       })
       if (taskErr) console.error('Failed to insert task:', taskErr)
       replyText = fnArgs.reply_message ?? `✅ Tarefa criada: ${fnArgs.title}`
+    } else if (fnName === 'delete_task') {
+      const { data: matchingTasks } = await supabase
+        .from('tasks')
+        .select('id, title')
+        .eq('workspace_id', workspace_id)
+        .ilike('title', `%${fnArgs.task_title}%`)
+        .limit(1)
+
+      if (matchingTasks?.length) {
+        const { error: delErr } = await supabase.from('tasks').delete().eq('id', matchingTasks[0].id)
+        if (delErr) console.error('Failed to delete task:', delErr)
+        replyText = fnArgs.reply_message ?? `🗑️ Tarefa "${matchingTasks[0].title}" removida.`
+      } else {
+        replyText = `❌ Não encontrei nenhuma tarefa com o nome "${fnArgs.task_title}".`
+      }
+    } else if (fnName === 'set_task_priority') {
+      const { data: matchingTasks } = await supabase
+        .from('tasks')
+        .select('id, title')
+        .eq('workspace_id', workspace_id)
+        .ilike('title', `%${fnArgs.task_title}%`)
+        .limit(1)
+
+      if (matchingTasks?.length) {
+        const { error: updateErr } = await supabase
+          .from('tasks')
+          .update({ priority: fnArgs.priority })
+          .eq('id', matchingTasks[0].id)
+        if (updateErr) console.error('Failed to set task priority:', updateErr)
+        const prioLabel = fnArgs.priority === 'high' ? '🔴 alta' : fnArgs.priority === 'low' ? '🟢 baixa' : '🟡 média'
+        replyText = fnArgs.reply_message ?? `✅ Prioridade da tarefa "${matchingTasks[0].title}" alterada para ${prioLabel}.`
+      } else {
+        replyText = `❌ Não encontrei nenhuma tarefa com o nome "${fnArgs.task_title}".`
+      }
     } else if (fnName === 'create_reminder') {
       const { error: remErr } = await supabase.from('reminders').insert({
         workspace_id,
@@ -855,7 +1000,6 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       if (remErr) console.error('Failed to insert reminder:', remErr)
       replyText = fnArgs.reply_message ?? `⏰ Lembrete criado: ${fnArgs.title}`
     } else if (fnName === 'update_task_status') {
-      // Find task by fuzzy title match
       const { data: matchingTasks } = await supabase
         .from('tasks')
         .select('id, title')
@@ -865,18 +1009,38 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
 
       if (matchingTasks?.length) {
         const task = matchingTasks[0]
-        const completedAt = fnArgs.new_status === 'done' ? new Date().toISOString() : null
+        // FIX: normalize status — "in_progress" → "doing"
+        let finalStatus = fnArgs.new_status as string
+        if (finalStatus === 'in_progress') finalStatus = 'doing'
+        const completedAt = finalStatus === 'done' ? new Date().toISOString() : null
         const { error: updateErr } = await supabase
           .from('tasks')
-          .update({ status: fnArgs.new_status, completed_at: completedAt })
+          .update({ status: finalStatus, completed_at: completedAt })
           .eq('id', task.id)
         if (updateErr) console.error('Failed to update task:', updateErr)
-        replyText = fnArgs.reply_message ?? `✅ Tarefa "${task.title}" atualizada: ${fnArgs.new_status}`
+        replyText = fnArgs.reply_message ?? `✅ Tarefa "${task.title}" atualizada: ${finalStatus}`
       } else {
         replyText = `❌ Não encontrei nenhuma tarefa com o nome "${fnArgs.task_title}". Verifique o nome e tente novamente.`
       }
+    } else if (fnName === 'create_contact') {
+      // Normalize phone to E.164 if needed
+      let phone = (fnArgs.phone as string).trim()
+      if (!phone.startsWith('+')) {
+        // Assume Brazilian number if no country code
+        phone = '+55' + phone.replace(/\D/g, '')
+      }
+
+      const { error: contactErr } = await supabase.from('contacts').upsert({
+        workspace_id,
+        name: fnArgs.name,
+        phone_e164: phone,
+        notes: fnArgs.notes ?? null,
+        tags: [],
+      }, { onConflict: 'workspace_id,phone_e164' })
+      if (contactErr) console.error('Failed to create contact:', contactErr)
+      replyText = fnArgs.reply_message ?? `✅ Contato "${fnArgs.name}" salvo: ${phone}`
     } else if (fnName === 'search_notes') {
-      const query = supabase
+      const q = supabase
         .from('notes')
         .select('title, category, content, created_at')
         .eq('workspace_id', workspace_id)
@@ -884,11 +1048,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         .order('created_at', { ascending: false })
         .limit(8)
 
-      if (fnArgs.category) {
-        query.eq('category', fnArgs.category)
-      }
+      if (fnArgs.category) q.eq('category', fnArgs.category)
 
-      const { data: searchResults } = await query
+      const { data: searchResults } = await q
 
       if (!searchResults?.length) {
         replyText = `🔍 Nenhuma nota encontrada para "${fnArgs.query}".`
@@ -900,18 +1062,17 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         replyText = `${fnArgs.reply_message}\n\n${notesList}`
       }
     } else if (fnName === 'financial_summary') {
-      // Calculate date range
-      const now = new Date()
+      const nowLocal = new Date()
       let dateFrom: Date
       if (fnArgs.period === 'hoje') {
-        dateFrom = new Date(now); dateFrom.setHours(0, 0, 0, 0)
+        dateFrom = new Date(nowLocal); dateFrom.setHours(0, 0, 0, 0)
       } else if (fnArgs.period === 'semana') {
-        dateFrom = new Date(now); dateFrom.setDate(now.getDate() - 7)
+        dateFrom = new Date(nowLocal); dateFrom.setDate(nowLocal.getDate() - 7)
       } else {
-        dateFrom = new Date(now); dateFrom.setDate(1); dateFrom.setHours(0, 0, 0, 0)
+        dateFrom = new Date(nowLocal); dateFrom.setDate(1); dateFrom.setHours(0, 0, 0, 0)
       }
 
-      // Broad single-query strategy: fetch ALL notes in period, filter in-code
+      // Single query — no N+1
       const { data: allPeriodNotes } = await supabase
         .from('notes')
         .select('id, title, content, category, created_at')
@@ -919,7 +1080,6 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         .gte('created_at', dateFrom.toISOString())
         .order('created_at', { ascending: false })
 
-      // Filter for financial notes using both category normalization and keyword scan
       const allFinancialNotes = (allPeriodNotes ?? []).filter(n => {
         const isFinancialCat = normalizeFinancialCategory(n.category)
         const text = `${n.title ?? ''} ${n.content ?? ''}`
@@ -967,11 +1127,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       }
     } else if (fnName === 'list_tasks') {
       const statusFilter = fnArgs.status
+      // FIX: use 'doing' not 'in_progress'
+      const statusValues = statusFilter === 'done' ? ['done'] : ['todo', 'doing']
       const { data: tasksList } = await supabase
         .from('tasks')
         .select('title, priority, status, due_at')
         .eq('workspace_id', workspace_id)
-        .in('status', statusFilter === 'done' ? ['done'] : ['todo', 'in_progress'])
+        .in('status', statusValues)
         .order('due_at', { ascending: true, nullsFirst: false })
         .limit(10)
 
@@ -980,8 +1142,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       } else {
         const listStr = tasksList.map((t, i) => {
           const prioEmoji = t.priority === 'high' ? '🔴' : t.priority === 'low' ? '🟢' : '🟡'
+          const statusEmoji = t.status === 'doing' ? ' ▶️' : ''
           const due = t.due_at ? ` — vence ${new Date(t.due_at).toLocaleDateString('pt-BR', { timeZone: tz })}` : ''
-          return `${i + 1}. ${prioEmoji} *${t.title}*${due}`
+          return `${i + 1}. ${prioEmoji} *${t.title}*${statusEmoji}${due}`
         }).join('\n')
         replyText = `${fnArgs.reply_message}\n\n${listStr}`
       }
@@ -1050,51 +1213,50 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         replyText = `❌ Não encontrei nenhuma nota com o nome "${fnArgs.note_title}".`
       }
     } else if (fnName === 'weekly_summary') {
-      const now = new Date()
-      const weekStart = new Date(now)
-      weekStart.setDate(now.getDate() - 7)
+      const nowWk = new Date()
+      const weekStart = new Date(nowWk)
+      weekStart.setDate(nowWk.getDate() - 7)
       weekStart.setHours(0, 0, 0, 0)
 
-      // Fetch all week data in parallel
+      // FIX: Fetch all week data in parallel + single query for financial notes (no N+1)
       const [
         { data: weekNotes },
         { data: weekTasksDone },
         { data: weekReminders },
+        { data: weekFinancialNotes },
       ] = await Promise.all([
         supabase.from('notes').select('id, title, category, created_at').eq('workspace_id', workspace_id).gte('created_at', weekStart.toISOString()).order('created_at', { ascending: false }).limit(20),
         supabase.from('tasks').select('id, title, status, completed_at').eq('workspace_id', workspace_id).eq('status', 'done').gte('updated_at', weekStart.toISOString()).limit(10),
         supabase.from('reminders').select('id, title, status').eq('workspace_id', workspace_id).in('status', ['sent', 'scheduled']).gte('remind_at', weekStart.toISOString()).limit(10),
+        // FIX: Single query for all financial note contents — eliminates N+1
+        supabase.from('notes').select('id, title, content, category').eq('workspace_id', workspace_id).gte('created_at', weekStart.toISOString()).or(`category.eq.Financeiro,category.ilike.%financ%,category.ilike.%gasto%`),
       ])
 
-      // Financial total for the week
       const allWeekNotes = weekNotes ?? []
-      const financialNotes = allWeekNotes.filter(n => normalizeFinancialCategory(n.category) || hasFinancialContent(n.title ?? ''))
+      const financialNotes = weekFinancialNotes ?? []
+
       let weekTotal = 0
       const financialLines: string[] = []
       for (const fn of financialNotes) {
-        const { data: fullNote } = await supabase.from('notes').select('title, content').eq('id', fn.id).single()
-        if (fullNote) {
-          const text = `${fullNote.title ?? ''} ${fullNote.content ?? ''}`
-          const fin = extractFinancialValues(text)
-          if (fin.total > 0) {
-            weekTotal += fin.total
-            financialLines.push(`  • ${fn.title} — ${formatCurrency(fin.total)}`)
-          }
+        const text = `${fn.title ?? ''} ${fn.content ?? ''}`
+        const fin = extractFinancialValues(text)
+        if (fin.total > 0) {
+          weekTotal += fin.total
+          financialLines.push(`  • ${fn.title} — ${formatCurrency(fin.total)}`)
         }
       }
 
-      // Count notes by category
       const categoryCount: Record<string, number> = {}
       for (const n of allWeekNotes) {
         const cat = n.category ?? 'Geral'
         categoryCount[cat] = (categoryCount[cat] ?? 0) + 1
       }
       const notesByCat = Object.entries(categoryCount).map(([c, count]) => `  • ${c}: ${count}`).join('\n') || '  Nenhuma nota.'
-      
+
       const tasksDoneList = (weekTasksDone ?? []).length > 0
         ? (weekTasksDone ?? []).map(t => `  ✅ ${t.title}`).join('\n')
         : '  Nenhuma tarefa concluída.'
-      
+
       const remindersSent = (weekReminders ?? []).filter(r => r.status === 'sent').length
       const remindersScheduled = (weekReminders ?? []).filter(r => r.status === 'scheduled').length
 
@@ -1120,7 +1282,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       replyText = (fnArgs.message as string) ?? 'Olá! Como posso ajudar? 😊'
     }
 
-    // ── 10. Save AI reply to messages table ──────────────────────────────────
+    // ── 11. Save AI reply to messages table ───────────────────────────────────
     await supabase.from('messages').insert({
       workspace_id,
       conversation_id,
@@ -1130,15 +1292,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       timestamp: new Date().toISOString(),
     })
 
-    // ── 11. Send reply to user ────────────────────────────────────────────────
+    // ── 12. Send reply to user ────────────────────────────────────────────────
     await sendReply({ supabase, provider, workspace_id, sender_phone, replyText })
 
-    // ── 12. TTS audio reply ──────────────────────────────────────────────────────
-    // Triggers when: (a) user sent audio, OR (b) user explicitly requested audio reply in text
+    // ── 13. TTS audio reply ───────────────────────────────────────────────────
     const ttsEnabled = (settings as Record<string, unknown>)?.tts_enabled === true
     const ttsVoiceId = ((settings as Record<string, unknown>)?.tts_voice_id as string) ?? 'FGY2WhTYpPnrIDTdsKH5'
 
-    // Broad regex: captures "áudio", "audio", "manda áudio", "responde em áudio", "em voz", "fala pra mim", etc.
     const userRequestedAudio = message_type === 'text' && (
       /\b[áa]udio\b/i.test(message_text ?? '') ||
       /respond[ae]\s*(em\s*)?[áa]udio/i.test(message_text ?? '') ||
@@ -1150,15 +1310,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     )
     const shouldSendAudio = ttsEnabled && (message_type === 'audio' || userRequestedAudio)
 
-    console.log(`[TTS] ttsEnabled=${ttsEnabled} | message_type=${message_type} | userRequestedAudio=${userRequestedAudio} | shouldSendAudio=${shouldSendAudio} | voice=${ttsVoiceId}`)
+    console.log(`[TTS] ttsEnabled=${ttsEnabled} | message_type=${message_type} | userRequestedAudio=${userRequestedAudio} | shouldSendAudio=${shouldSendAudio}`)
 
     if (shouldSendAudio) {
       try {
         const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
         const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
-        // Strip the "[Áudio]:" prefix that AI sometimes adds, to avoid TTS reading it literally
         const ttsText = replyText.replace(/^\[?[áa]udio\]?:\s*/i, '').trim()
-        console.log(`[TTS] Chamando tts-function com voice_id=${ttsVoiceId} | texto=${ttsText.slice(0, 80)}...`)
         const ttsRes = await fetch(`${SUPABASE_URL}/functions/v1/elevenlabs-tts`, {
           method: 'POST',
           headers: {
@@ -1170,30 +1328,18 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         })
         if (ttsRes.ok) {
           const { base64, content_type } = await ttsRes.json()
-          console.log(`[TTS] Áudio gerado — content_type=${content_type} | base64_len=${base64?.length ?? 0}`)
-          // Evolution API expects phone WITHOUT leading +
           const phoneClean = sender_phone.replace(/^\+/, '')
-          console.log(`[TTS] Enviando áudio para phone=${phoneClean} via provider=${provider}`)
           await sendAudioReply({ supabase, provider, workspace_id, phone: phoneClean, base64, content_type })
-          console.log(`[TTS] sendAudioReply concluído`)
         } else {
           const errBody = await ttsRes.text()
           console.error(`[TTS] Falha na geração de áudio: status=${ttsRes.status} | body=${errBody.slice(0, 500)}`)
-          // Fallback: inform user that audio is unavailable
-          await sendReply({
-            supabase, provider, workspace_id, sender_phone,
-            replyText: '⚠️ Não consegui gerar o áudio agora. A resposta de texto já foi enviada acima.',
-          })
+          await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: '⚠️ Não consegui gerar o áudio agora. A resposta de texto já foi enviada acima.' })
         }
       } catch (ttsErr) {
-        console.error('[TTS] Erro inesperado no bloco TTS:', ttsErr)
-        // Fallback notification on unexpected error
+        console.error('[TTS] Erro inesperado:', ttsErr)
         try {
-          await sendReply({
-            supabase, provider, workspace_id, sender_phone,
-            replyText: '⚠️ Ocorreu um erro ao gerar o áudio. Verifique a resposta em texto acima.',
-          })
-        } catch (_) { /* ignore secondary failure */ }
+          await sendReply({ supabase, provider, workspace_id, sender_phone, replyText: '⚠️ Ocorreu um erro ao gerar o áudio. Verifique a resposta em texto acima.' })
+        } catch (_) { /* ignore */ }
       }
     }
 
@@ -1308,7 +1454,6 @@ async function dispatchReply(integration: Record<string, unknown>, phone: string
   }
 }
 
-// ── Audio reply via TTS ──────────────────────────────────────────────────────
 async function sendAudioReply({
   supabase,
   provider,
@@ -1339,23 +1484,17 @@ async function sendAudioReply({
     }
 
     if (integration.provider === 'EVOLUTION') {
-      // Evolution API: send as WhatsApp audio (PTT voice note) via sendWhatsAppAudio
       const audioRes = await fetch(`${integration.api_url}/message/sendWhatsAppAudio/${integration.instance_id}`, {
         method: 'POST',
         headers: {
           apikey: (integration.api_key_encrypted as string) ?? '',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          number: phone,
-          audio: base64,
-          encoding: true,
-        }),
+        body: JSON.stringify({ number: phone, audio: base64, encoding: true }),
       })
       if (!audioRes.ok) {
         const errText = await audioRes.text()
         console.warn(`sendWhatsAppAudio failed (${audioRes.status}):`, errText.slice(0, 300))
-        // Fallback: try sendMedia
         await fetch(`${integration.api_url}/message/sendMedia/${integration.instance_id}`, {
           method: 'POST',
           headers: {
@@ -1372,7 +1511,6 @@ async function sendAudioReply({
         })
       }
     } else if (integration.provider === 'TELEGRAM') {
-      // Telegram: sendVoice via multipart FormData with binary blob
       const chatId = phone.startsWith('tg:') ? phone.slice(3) : phone
       const binaryStr = atob(base64)
       const bytes = new Uint8Array(binaryStr.length)
@@ -1388,7 +1526,6 @@ async function sendAudioReply({
         body: form,
       })
     }
-    // CLOUD (Meta) does not support base64 audio without a public URL — skip silently
   } catch (err) {
     console.warn('sendAudioReply error (non-blocking):', err)
   }
