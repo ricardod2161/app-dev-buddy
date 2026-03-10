@@ -842,6 +842,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     let fnName = 'just_reply'
     let fnArgs: Record<string, unknown> = { message: 'Olá! Como posso ajudar? 😊' }
     let aiCallSuccess = false
+    let usedModel: string | null = null
 
     for (const model of AI_MODELS) {
       if (aiCallSuccess) break
@@ -881,11 +882,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
           fnName = 'just_reply'
           fnArgs = { message: rawContent?.trim() || 'Como posso ajudar? 😊' }
           aiCallSuccess = true
+          usedModel = model
         } else {
           fnName = toolCall.function.name
           try {
             fnArgs = JSON.parse(toolCall.function.arguments)
             aiCallSuccess = true
+            usedModel = model
             console.log(`[AI] Model ${model} → tool=${fnName}`)
           } catch (parseErr) {
             console.error(`[AI] Model ${model} returned unparseable args:`, toolCall.function.arguments?.slice(0, 200))
