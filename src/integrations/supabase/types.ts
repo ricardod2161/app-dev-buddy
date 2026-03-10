@@ -493,32 +493,41 @@ export type Database = {
       }
       webhook_logs: {
         Row: {
+          ai_action: string | null
+          ai_model: string | null
           created_at: string | null
           error: string | null
           event_type: string | null
           id: string
           payload_json: Json | null
           provider: string | null
+          response_ms: number | null
           status: string | null
           workspace_id: string | null
         }
         Insert: {
+          ai_action?: string | null
+          ai_model?: string | null
           created_at?: string | null
           error?: string | null
           event_type?: string | null
           id?: string
           payload_json?: Json | null
           provider?: string | null
+          response_ms?: number | null
           status?: string | null
           workspace_id?: string | null
         }
         Update: {
+          ai_action?: string | null
+          ai_model?: string | null
           created_at?: string | null
           error?: string | null
           event_type?: string | null
           id?: string
           payload_json?: Json | null
           provider?: string | null
+          response_ms?: number | null
           status?: string | null
           workspace_id?: string | null
         }
