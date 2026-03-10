@@ -15,6 +15,7 @@ interface ProcessMessageBody {
   media_url?: string | null
   media_base64?: string | null
   media_mime?: string | null
+  log_id?: string | null
 }
 
 // ── Financial helpers ──────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ Deno.serve(async (req) => {
   )
 
   try {
+    const startTime = Date.now()
     const body: ProcessMessageBody = await req.json()
     const {
       workspace_id,
@@ -76,6 +78,7 @@ Deno.serve(async (req) => {
       media_url,
       media_base64,
       media_mime,
+      log_id,
     } = body
 
     // Skip stickers silently
@@ -839,6 +842,7 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
     let fnName = 'just_reply'
     let fnArgs: Record<string, unknown> = { message: 'Olá! Como posso ajudar? 😊' }
     let aiCallSuccess = false
+    let usedModel: string | null = null
 
     for (const model of AI_MODELS) {
       if (aiCallSuccess) break
@@ -878,11 +882,13 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
           fnName = 'just_reply'
           fnArgs = { message: rawContent?.trim() || 'Como posso ajudar? 😊' }
           aiCallSuccess = true
+          usedModel = model
         } else {
           fnName = toolCall.function.name
           try {
             fnArgs = JSON.parse(toolCall.function.arguments)
             aiCallSuccess = true
+            usedModel = model
             console.log(`[AI] Model ${model} → tool=${fnName}`)
           } catch (parseErr) {
             console.error(`[AI] Model ${model} returned unparseable args:`, toolCall.function.arguments?.slice(0, 200))
@@ -1417,6 +1423,17 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       body_text: replyText,
       timestamp: new Date().toISOString(),
     })
+
+    // ── 11b. Update webhook_log with AI metrics ───────────────────────────────
+    if (log_id) {
+      supabase.from('webhook_logs').update({
+        ai_model: usedModel ?? null,
+        ai_action: fnName,
+        response_ms: Date.now() - startTime,
+      }).eq('id', log_id).then(({ error }) => {
+        if (error) console.warn('[process-message] Failed to update webhook_log metrics:', error.message)
+      })
+    }
 
     // ── 12. Send reply to user ────────────────────────────────────────────────
     await sendReply({ supabase, provider, workspace_id, sender_phone, replyText })

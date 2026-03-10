@@ -143,6 +143,9 @@ export interface WebhookLog {
   status: 'ok' | 'error' | 'auth_error' | 'rate_limited'
   error: string | null
   created_at: string
+  ai_model: string | null
+  ai_action: string | null
+  response_ms: number | null
 }
 
 export interface Contact {

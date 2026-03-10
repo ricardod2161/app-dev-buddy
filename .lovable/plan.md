@@ -1,86 +1,120 @@
 
-## Análise completa do sistema
+## Diagnóstico: Delete já existe — problema é na experiência
 
-### Situação atual dos logs
-A tabela `webhook_logs` armazena: `provider`, `event_type`, `status`, `error`, `payload_json`. **Não há nenhuma coluna para dados de IA** (modelo usado, tempo de resposta, ação executada). Isso precisa ser adicionado.
+O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
 
-### O que vai ser feito
+### Problemas identificados
+
+**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
+O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
+
+**2. Match parcial pode falhar em casos reais**
+A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
+
+**3. Erro "não encontrei" não ajuda o usuário**
+Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
+
+**4. Sem confirmação antes de deletar**
+A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
+
+**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
 
 ---
 
-**1. Migração SQL — adicionar colunas AI ao `webhook_logs`**
+### O que será feito
 
-```sql
-ALTER TABLE public.webhook_logs 
-  ADD COLUMN IF NOT EXISTS ai_model text,
-  ADD COLUMN IF NOT EXISTS ai_action text,
-  ADD COLUMN IF NOT EXISTS response_ms integer;
+**Arquivo:** `supabase/functions/process-message/index.ts`
+
+**A — Adicionar seção explícita no system prompt para deleção**
+Antes das "Regras de Ouro", adicionar:
+
+```
+## Exclusão de Itens — OBRIGATÓRIO
+Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
+- Tarefa → use delete_task com o título completo ou parte do título
+- Nota → use delete_note com o título
+- Lembrete → use cancel_reminder
+
+Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
+"não preciso mais de", "cancela", "remove", "zera", "descarta"
+
+ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
+para o usuário escolher — não retorne erro vazio.
 ```
 
-- `ai_model`: qual modelo foi usado (`google/gemini-3-flash-preview`, `google/gemini-2.5-pro`, etc.)
-- `ai_action`: ferramenta chamada (`create_note`, `delete_task`, `just_reply`, etc.)
-- `response_ms`: tempo total de processamento em ms
+**B — Melhorar o handler `delete_task` quando não encontra**
+Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
 
----
-
-**2. `supabase/functions/process-message/index.ts` — gravar métricas AI**
-
-Adicionar `startTime = Date.now()` no início do processamento. Após o AI call, antes do `sendReply`, fazer um `UPDATE` no `webhook_log` correspondente com:
 ```typescript
-// No final do processamento bem-sucedido:
-await supabase.from('webhook_logs')
-  .update({ 
-    ai_model: usedModel,
-    ai_action: fnName,
-    response_ms: Date.now() - startTime
-  })
-  .eq('id', logId)  // logId é passado no body pelo webhook-whatsapp
+// Quando não encontra: lista as tarefas disponíveis
+const { data: allTasks } = await supabase
+  .from('tasks')
+  .select('title, status')
+  .eq('workspace_id', workspace_id)
+  .in('status', ['todo', 'doing'])
+  .order('created_at', { ascending: false })
+  .limit(8)
+
+if (allTasks?.length) {
+  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
+  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
+} else {
+  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
+}
 ```
 
-O `logId` já é criado no `webhook-whatsapp/index.ts` e passado para `process-message` como parte do body — precisamos adicioná-lo ao body do `ProcessMessageBody` interface.
+**C — Mesma melhoria para `delete_note`**
+Quando não encontrar a nota, listar as notas recentes:
+
+```typescript
+const { data: allNotes } = await supabase
+  .from('notes')
+  .select('title, category')
+  .eq('workspace_id', workspace_id)
+  .order('created_at', { ascending: false })
+  .limit(8)
+
+if (allNotes?.length) {
+  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
+  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
+} else {
+  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
+}
+```
+
+**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
+Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
+
+**E — Melhorar o match com busca por palavras individuais**
+Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
+
+```typescript
+// Fallback: tenta match por primeira palavra significativa
+if (!matchingTasks?.length) {
+  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
+  if (words.length > 0) {
+    const { data: fallbackTasks } = await supabase
+      .from('tasks')
+      .select('id, title')
+      .eq('workspace_id', workspace_id)
+      .ilike('title', `%${words[0]}%`)
+      .limit(1)
+    // use fallbackTasks if found
+  }
+}
+```
 
 ---
 
-**3. `src/pages/app/Logs.tsx` — painel de AI em tempo real**
-
-Transformar a página com **duas abas** via `<Tabs>`:
-
-**Aba 1: "Webhooks"** — tabela existente (mantida igual)
-
-**Aba 2: "IA em Tempo Real"** — novo painel com:
-- Cards de estatísticas no topo:
-  - Total de mensagens processadas (hoje)
-  - Tempo médio de resposta (ms → exibir como "2.3s")
-  - Modelo mais usado
-  - Ação mais frequente
-- Tabela com colunas: Data/Hora | Provider | Ação IA | Modelo | Tempo
-- Realtime subscription via Supabase channel em `webhook_logs` — ao chegar novo log com `ai_action` preenchido, invalida a query automaticamente
-- Badge colorido por ação: `create_note` (azul), `create_task` (verde), `delete_*` (vermelho), `just_reply` (cinza), `weekly_summary` (roxo), etc.
-- Badge colorido por modelo: flash (amarelo), pro (azul), flash-lite (cinza)
-
----
-
-**4. Melhorias gerais identificadas no sistema**
-
-Enquanto analiso os arquivos, identifico mais oportunidades:
-
-**a) `webhook-whatsapp/index.ts`**: O `logId` já existe mas **não é passado para `process-message`**. O process-message não consegue atualizar o log com dados AI. Precisamos passar `log_id` no body do `fetch` para `process-message`.
-
-**b) `src/types/database.ts`**: Adicionar as 3 novas colunas ao `WebhookLog` interface.
-
-**c) `src/pages/app/Logs.tsx`**: Adicionar Realtime subscription para auto-refresh — atualmente a lista só atualiza no reload.
-
-**d) `webhook-telegram/index.ts`**: Mesma correção de passar `log_id` para o process-message.
-
----
-
-### Arquivos alterados
+### Resumo dos arquivos
 
 ```
-NEW migration              — ADD COLUMN ai_model, ai_action, response_ms
-MOD webhook-whatsapp       — passar log_id no body para process-message
-MOD webhook-telegram       — idem
-MOD process-message        — receber log_id, gravar startTime, UPDATE webhook_log com métricas AI
-MOD src/types/database.ts  — adicionar ai_model, ai_action, response_ms ao WebhookLog
-MOD src/pages/app/Logs.tsx — duas abas: Webhooks + IA em Tempo Real com stats, tabela e Realtime
+MOD  supabase/functions/process-message/index.ts
+  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
+  B — handler delete_task: quando não encontra, lista tarefas disponíveis
+  C — handler delete_note: quando não encontra, lista notas recentes  
+  D — system prompt: instrução "excluir lembrete = cancel_reminder"
+  E — handlers delete_task + delete_note: fallback de busca por palavra individual
 ```
+
+Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
