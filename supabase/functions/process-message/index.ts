@@ -15,6 +15,7 @@ interface ProcessMessageBody {
   media_url?: string | null
   media_base64?: string | null
   media_mime?: string | null
+  log_id?: string | null
 }
 
 // ── Financial helpers ──────────────────────────────────────────────────────────

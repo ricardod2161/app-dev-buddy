@@ -421,6 +421,7 @@ Deno.serve(async (req) => {
         media_base64: mediaBase64,
         media_mime: mediaMime,
         provider_message_id: providerMessageId,
+        log_id: logId,
       }),
     }).catch((e) => console.error('[webhook] process-message dispatch error:', e))
 

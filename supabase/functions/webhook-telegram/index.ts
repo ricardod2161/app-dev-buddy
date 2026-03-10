@@ -195,6 +195,7 @@ Deno.serve(async (req) => {
         message_type: messageType,
         media_url: mediaUrl,
         media_mime: mediaMime,
+        log_id: logId,
       }),
     }).catch((e) => console.error('process-message fire-and-forget error:', e))
 
