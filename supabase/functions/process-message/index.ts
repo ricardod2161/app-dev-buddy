@@ -1421,6 +1421,17 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       timestamp: new Date().toISOString(),
     })
 
+    // ── 11b. Update webhook_log with AI metrics ───────────────────────────────
+    if (log_id) {
+      supabase.from('webhook_logs').update({
+        ai_model: usedModel ?? null,
+        ai_action: fnName,
+        response_ms: Date.now() - startTime,
+      }).eq('id', log_id).then(({ error }) => {
+        if (error) console.warn('[process-message] Failed to update webhook_log metrics:', error.message)
+      })
+    }
+
     // ── 12. Send reply to user ────────────────────────────────────────────────
     await sendReply({ supabase, provider, workspace_id, sender_phone, replyText })
 
