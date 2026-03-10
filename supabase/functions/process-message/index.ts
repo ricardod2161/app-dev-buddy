@@ -66,6 +66,7 @@ Deno.serve(async (req) => {
   )
 
   try {
+    const startTime = Date.now()
     const body: ProcessMessageBody = await req.json()
     const {
       workspace_id,
@@ -77,6 +78,7 @@ Deno.serve(async (req) => {
       media_url,
       media_base64,
       media_mime,
+      log_id,
     } = body
 
     // Skip stickers silently
