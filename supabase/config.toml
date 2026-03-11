@@ -1,4 +1,3 @@
-supabase/config.toml
 project_id = "qymbrzhrfcstvwkvrgnm"
 
 [functions.webhook-whatsapp]
