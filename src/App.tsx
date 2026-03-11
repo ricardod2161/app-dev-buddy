@@ -29,6 +29,49 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 1000 * 60, retry: 1 } },
 })
 
+function AppWithPalette() {
+  const [cmdOpen, setCmdOpen] = useState(false)
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setCmdOpen(prev => !prev)
+      }
+    }
+    document.addEventListener('keydown', down)
+    return () => document.removeEventListener('keydown', down)
+  }, [])
+
+  return (
+    <>
+      <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+      <Routes>
+        <Route path="/" element={<Navigate to="/app" replace />} />
+        <Route element={<AuthLayout />}>
+          <Route path="/auth/login" element={<ErrorBoundary fallbackTitle="Erro na tela de login"><LoginPage /></ErrorBoundary>} />
+          <Route path="/auth/register" element={<ErrorBoundary fallbackTitle="Erro no cadastro"><RegisterPage /></ErrorBoundary>} />
+        </Route>
+        <Route element={<AppLayout cmdOpen={cmdOpen} onCmdOpen={setCmdOpen} />}>
+          <Route path="/app" element={<ErrorBoundary fallbackTitle="Erro no Dashboard"><DashboardPage /></ErrorBoundary>} />
+          <Route path="/app/notes" element={<ErrorBoundary fallbackTitle="Erro nas Notas"><NotesPage /></ErrorBoundary>} />
+          <Route path="/app/tasks" element={<ErrorBoundary fallbackTitle="Erro nas Tarefas"><TasksPage /></ErrorBoundary>} />
+          <Route path="/app/reports" element={<ErrorBoundary fallbackTitle="Erro nos Relatórios"><ReportsPage /></ErrorBoundary>} />
+          <Route path="/app/conversations" element={<ErrorBoundary fallbackTitle="Erro nas Conversas"><ConversationsPage /></ErrorBoundary>} />
+          <Route path="/app/contacts" element={<ErrorBoundary fallbackTitle="Erro nos Contatos"><ContactsPage /></ErrorBoundary>} />
+          <Route path="/app/reminders" element={<ErrorBoundary fallbackTitle="Erro nos Lembretes"><RemindersPage /></ErrorBoundary>} />
+          <Route path="/app/integrations" element={<ErrorBoundary fallbackTitle="Erro nas Integrações"><IntegrationsPage /></ErrorBoundary>} />
+          <Route path="/app/whitelist" element={<ErrorBoundary fallbackTitle="Erro na Whitelist"><WhitelistPage /></ErrorBoundary>} />
+          <Route path="/app/settings" element={<ErrorBoundary fallbackTitle="Erro nas Configurações"><SettingsPage /></ErrorBoundary>} />
+          <Route path="/app/logs" element={<ErrorBoundary fallbackTitle="Erro nos Logs"><LogsPage /></ErrorBoundary>} />
+          <Route path="/app/ai-chat" element={<ErrorBoundary fallbackTitle="Erro no Chat IA"><AIChatPage /></ErrorBoundary>} />
+        </Route>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
+  )
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -36,27 +79,7 @@ const App = () => (
         <TooltipProvider>
           <Sonner richColors position="top-right" />
           <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Navigate to="/app" replace />} />
-              <Route element={<AuthLayout />}>
-                <Route path="/auth/login" element={<ErrorBoundary fallbackTitle="Erro na tela de login"><LoginPage /></ErrorBoundary>} />
-                <Route path="/auth/register" element={<ErrorBoundary fallbackTitle="Erro no cadastro"><RegisterPage /></ErrorBoundary>} />
-              </Route>
-              <Route element={<AppLayout />}>
-                <Route path="/app" element={<ErrorBoundary fallbackTitle="Erro no Dashboard"><DashboardPage /></ErrorBoundary>} />
-                <Route path="/app/notes" element={<ErrorBoundary fallbackTitle="Erro nas Notas"><NotesPage /></ErrorBoundary>} />
-                <Route path="/app/tasks" element={<ErrorBoundary fallbackTitle="Erro nas Tarefas"><TasksPage /></ErrorBoundary>} />
-                <Route path="/app/reports" element={<ErrorBoundary fallbackTitle="Erro nos Relatórios"><ReportsPage /></ErrorBoundary>} />
-                <Route path="/app/conversations" element={<ErrorBoundary fallbackTitle="Erro nas Conversas"><ConversationsPage /></ErrorBoundary>} />
-                <Route path="/app/contacts" element={<ErrorBoundary fallbackTitle="Erro nos Contatos"><ContactsPage /></ErrorBoundary>} />
-                <Route path="/app/reminders" element={<ErrorBoundary fallbackTitle="Erro nos Lembretes"><RemindersPage /></ErrorBoundary>} />
-                <Route path="/app/integrations" element={<ErrorBoundary fallbackTitle="Erro nas Integrações"><IntegrationsPage /></ErrorBoundary>} />
-                <Route path="/app/whitelist" element={<ErrorBoundary fallbackTitle="Erro na Whitelist"><WhitelistPage /></ErrorBoundary>} />
-                <Route path="/app/settings" element={<ErrorBoundary fallbackTitle="Erro nas Configurações"><SettingsPage /></ErrorBoundary>} />
-                <Route path="/app/logs" element={<ErrorBoundary fallbackTitle="Erro nos Logs"><LogsPage /></ErrorBoundary>} />
-              </Route>
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <AppWithPalette />
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>
