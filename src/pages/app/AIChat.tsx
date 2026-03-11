@@ -333,17 +333,20 @@ const AIChat: React.FC = () => {
   }, [workspaceId, includeContext])
 
   // Load messages for selected conversation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+
   useEffect(() => {
     if (!selectedConvId || !workspaceId) return
-    supabase
-      .from('ai_messages' as never)
+    sb
+      .from('ai_messages')
       .select('*')
       .eq('conversation_id', selectedConvId)
       .neq('role', 'system')
       .order('created_at', { ascending: true })
-      .then(({ data }) => {
+      .then(({ data }: { data: AIMessage[] | null }) => {
         if (data) {
-          setChatMessages((data as AIMessage[]).map(m => ({
+          setChatMessages(data.map(m => ({
             id: m.id,
             role: m.role as 'user' | 'assistant',
             content: m.content,
@@ -357,8 +360,8 @@ const AIChat: React.FC = () => {
     mutationFn: async (firstMessage: string) => {
       if (!workspaceId) throw new Error('No workspace')
       const title = firstMessage.length > 50 ? firstMessage.slice(0, 50) + '…' : firstMessage
-      const { data, error } = await supabase
-        .from('ai_conversations' as never)
+      const { data, error } = await sb
+        .from('ai_conversations')
         .insert({ workspace_id: workspaceId, title, model })
         .select()
         .single()
@@ -375,16 +378,16 @@ const AIChat: React.FC = () => {
     content: string
   ) => {
     if (!workspaceId) return
-    await supabase
-      .from('ai_messages' as never)
+    await sb
+      .from('ai_messages')
       .insert({ conversation_id: convId, workspace_id: workspaceId, role, content })
   }, [workspaceId])
 
   // Delete conversation
   const deleteConvMut = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('ai_conversations' as never)
+      const { error } = await sb
+        .from('ai_conversations')
         .delete()
         .eq('id', id)
       if (error) throw error
