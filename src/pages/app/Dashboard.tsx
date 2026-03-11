@@ -244,6 +244,31 @@ const DashboardPage: React.FC = () => {
             </CardContent>
           </Card>
         ))}
+
+        {/* AI Metrics Card */}
+        <Card className="hover:shadow-md transition-shadow col-span-2 xl:col-span-1">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start justify-between mb-3">
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground leading-tight">IA Hoje</p>
+              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center shrink-0">
+                <Bot className="w-4 h-4 text-blue-500" />
+              </div>
+            </div>
+            {loadingAiMetrics
+              ? <Skeleton className="h-8 w-20" />
+              : aiMetrics
+                ? (
+                  <div className="space-y-0.5">
+                    <p className="text-2xl sm:text-3xl font-bold text-foreground">{aiMetrics.total}</p>
+                    <p className="text-xs text-muted-foreground">
+                      ~{aiMetrics.avgMs < 1000 ? `${aiMetrics.avgMs}ms` : `${(aiMetrics.avgMs / 1000).toFixed(1)}s`} · {aiMetrics.topModel}
+                    </p>
+                  </div>
+                )
+                : <p className="text-2xl font-bold text-foreground">—</p>
+            }
+          </CardContent>
+        </Card>
       </div>
 
       {/* Charts */}
