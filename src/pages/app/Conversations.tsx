@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import React, { useState, useRef, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { format } from 'date-fns'
@@ -37,10 +37,11 @@ function getAvatarColor(str: string): string {
 
 const ConversationsPage: React.FC = () => {
   const { workspaceId } = useAuth()
+  const qc = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  // Mobile: 'list' or 'chat'
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list')
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const { data: conversations, isLoading: loadingConvs } = useQuery({
     queryKey: ['conversations', workspaceId],
@@ -70,6 +71,28 @@ const ConversationsPage: React.FC = () => {
     },
     enabled: !!workspaceId && !!selectedId,
   })
+
+  // Real-time: invalidate queries when new messages arrive
+  useEffect(() => {
+    if (!workspaceId || !selectedId) return
+    const channel = supabase
+      .channel(`conv-messages-${selectedId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `workspace_id=eq.${workspaceId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['messages', workspaceId, selectedId] })
+          qc.invalidateQueries({ queryKey: ['conversations', workspaceId] })
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [workspaceId, selectedId, qc])
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   const filteredConvs = (conversations ?? []).filter(c => {
     const q = search.toLowerCase()
@@ -231,6 +254,7 @@ const ConversationsPage: React.FC = () => {
                   </div>
                 ))
             }
+            <div ref={messagesEndRef} />
           </div>
         </>
       )}

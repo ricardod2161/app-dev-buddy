@@ -1,139 +1,120 @@
 
-## Reality check on the request
+## Diagnóstico: Delete já existe — problema é na experiência
 
-The user wants to "transform the app into the most complete and intelligent productivity app in Brazil." This is an extremely broad prompt asking for dozens of features simultaneously. I need to be honest about what's realistic to implement in one pass without breaking the existing production system.
+O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
 
-**What's already working well:**
-- App.tsx, main.tsx, all Providers — fully correct
-- AuthContext — intentional timeouts for DB trigger race conditions, must not touch
-- All 11 pages — functional
-- ErrorBoundary — already wrapping all routes
-- Sidebar with groups — already done
-- Tasks Kanban with dnd-kit — already 3 columns
-- Notes with TipTap — already rich editor
-- Real-time conversations via Supabase
-- AI logs panel with metrics
-- process-message edge function with Flash/Pro routing
+### Problemas identificados
 
-**What I'll actually build** (high-impact, realistic, safe):
+**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
+O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
 
-### 1. AI Chat Module — `/app/ai-chat` (NEW PAGE — the crown jewel)
-A dedicated AI chat page with the Lovable AI Gateway that:
-- Premium chat UI (Claude/ChatGPT-style bubbles with copy button, timestamp)
-- Streams responses token-by-token via SSE
-- Model selector (Flash / Pro / GPT-5 Mini) visible in UI
-- Auto-pulls context: fetches last 5 notes + 5 open tasks + workspace name to inject into system prompt
-- Suggests 3 contextual prompts on load based on pending tasks/notes
-- "Deep Think" toggle: when ON, uses gemini-2.5-pro and adds chain-of-thought prefix to system prompt
-- Conversation persisted in Supabase `ai_conversations` + `ai_messages` tables for history
-- Copy message, clear chat, export as Markdown buttons
-- Add new edge function `supabase/functions/ai-chat/index.ts`
-- Requires DB migration for 2 new tables
+**2. Match parcial pode falhar em casos reais**
+A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
 
-### 2. Command Palette — `src/components/CommandPalette.tsx` (NEW)
-- Global Cmd/K using the `cmdk` package (already installed)
-- Navigate to any page, search notes/tasks by title
-- Keyboard shortcut registered in App.tsx
+**3. Erro "não encontrei" não ajuda o usuário**
+Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
 
-### 3. Conversations page — real-time upgrade
-- Add Supabase Realtime subscription for new messages in the active conversation
-- Auto-scroll to bottom when new messages arrive
-- This completes the "real-time" feature already described in project memory
+**4. Sem confirmação antes de deletar**
+A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
 
-### 4. AppSidebar — add AI Chat link
-- Add the new `/app/ai-chat` route as a highlighted item ("IA" with sparkle icon) in the "Principal" group
-
-### 5. TopBar — add Command Palette trigger button
-- Add a `Search` button (Cmd+K shortcut hint) in the TopBar
-
-### What I will NOT do (scope management):
-- Full Notion-style slash commands — would require 500+ lines of complex TipTap extensions
-- Calendar view for reminders — not enough existing schema support
-- PWA manifest — minor, separate concern
-- Framer Motion — adds dependency, existing CSS animations are good
-- Kanban 4th column — Tasks already has 3 columns with full dnd-kit, a 4th "canceled" column has no schema support
-- Feature folder migration — high risk, zero user-visible benefit
-- Command Palette searching DB records — requires careful async search with debounce (will do navigation only)
+**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
 
 ---
 
-## Detailed Implementation Plan
+### O que será feito
 
-### DB Migration
-```sql
-CREATE TABLE public.ai_conversations (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id uuid NOT NULL,
-  title text NOT NULL DEFAULT 'Nova Conversa',
-  model text NOT NULL DEFAULT 'google/gemini-2.5-flash',
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
-);
+**Arquivo:** `supabase/functions/process-message/index.ts`
 
-CREATE TABLE public.ai_messages (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  conversation_id uuid NOT NULL REFERENCES public.ai_conversations(id) ON DELETE CASCADE,
-  workspace_id uuid NOT NULL,
-  role text NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-  content text NOT NULL,
-  created_at timestamptz DEFAULT now()
-);
+**A — Adicionar seção explícita no system prompt para deleção**
+Antes das "Regras de Ouro", adicionar:
 
--- RLS
-ALTER TABLE public.ai_conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ai_messages ENABLE ROW LEVEL SECURITY;
+```
+## Exclusão de Itens — OBRIGATÓRIO
+Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
+- Tarefa → use delete_task com o título completo ou parte do título
+- Nota → use delete_note com o título
+- Lembrete → use cancel_reminder
 
-CREATE POLICY "Members can CRUD ai_conversations"
-  ON public.ai_conversations FOR ALL TO authenticated
-  USING (is_workspace_member(workspace_id, auth.uid()))
-  WITH CHECK (is_workspace_member(workspace_id, auth.uid()));
+Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
+"não preciso mais de", "cancela", "remove", "zera", "descarta"
 
-CREATE POLICY "Members can CRUD ai_messages"
-  ON public.ai_messages FOR ALL TO authenticated
-  USING (is_workspace_member(workspace_id, auth.uid()))
-  WITH CHECK (is_workspace_member(workspace_id, auth.uid()));
+ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
+para o usuário escolher — não retorne erro vazio.
 ```
 
-### Edge Function: `supabase/functions/ai-chat/index.ts`
-- Receives: `{ messages, model, workspace_id, include_context }`
-- When `include_context=true`: fetches last 5 notes + 5 open tasks + workspace settings from Supabase using service role key
-- Builds system prompt with: personality, context, today's date, workspace name
-- When `deep_think=true` (passed as model="google/gemini-2.5-pro"): prefixes system with chain-of-thought instructions
-- Calls Lovable AI Gateway with streaming=true
-- Returns SSE stream directly
+**B — Melhorar o handler `delete_task` quando não encontra**
+Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
 
-### New Page: `src/pages/app/AIChat.tsx`
-- Left sidebar (250px): conversation list with dates, New Chat button, delete
-- Right main area: message stream + input
-- Header: model selector dropdown (Flash / Flash Preview / Pro), Deep Think toggle, Clear, Export MD
-- Context banner: shows when workspace context is loaded ("Contexto carregado: 5 notas, 3 tarefas")
-- Suggested prompts: shown on empty chat — dynamically built from tasks titles
-- Streaming: token-by-token using `useRef` + `ReadableStream` reader
-- Copy individual messages, regenerate last response
+```typescript
+// Quando não encontra: lista as tarefas disponíveis
+const { data: allTasks } = await supabase
+  .from('tasks')
+  .select('title, status')
+  .eq('workspace_id', workspace_id)
+  .in('status', ['todo', 'doing'])
+  .order('created_at', { ascending: false })
+  .limit(8)
 
-### File: `src/components/CommandPalette.tsx`
-- Uses `cmdk` Dialog pattern (already in ui/command.tsx)
-- Groups: Navigation (all 12 routes with icons), Recent (last 3 notes from useQuery cache)
-- Opens on `Cmd/Ctrl+K` via `useEffect` in App.tsx
-- State: `commandOpen` lifted up with a small context or simple prop
-
-### Route additions
-- `src/App.tsx`: add `/app/ai-chat` route
-- `src/components/AppSidebar.tsx`: add AI Chat entry with `Sparkles` icon at top of Principal group
-- `src/components/TopBar.tsx`: add search button that opens palette
-- `src/types/database.ts`: add `AIConversation`, `AIMessage` types
-
-### Files to create/modify:
-```
-NEW  supabase/migrations/YYYYMMDD_ai_chat_tables.sql
-NEW  supabase/functions/ai-chat/index.ts
-NEW  src/pages/app/AIChat.tsx
-NEW  src/components/CommandPalette.tsx
-MOD  src/App.tsx                — add /app/ai-chat route + CommandPalette
-MOD  src/components/AppSidebar.tsx — add AI Chat nav item (Sparkles icon)
-MOD  src/components/TopBar.tsx  — add Cmd+K button
-MOD  src/types/database.ts      — add AIConversation, AIMessage types
-MOD  src/pages/app/Conversations.tsx — add Supabase Realtime subscription
+if (allTasks?.length) {
+  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
+  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
+} else {
+  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
+}
 ```
 
-Total: 4 new files, 5 modified files. All safe, isolated, no breaking changes.
+**C — Mesma melhoria para `delete_note`**
+Quando não encontrar a nota, listar as notas recentes:
+
+```typescript
+const { data: allNotes } = await supabase
+  .from('notes')
+  .select('title, category')
+  .eq('workspace_id', workspace_id)
+  .order('created_at', { ascending: false })
+  .limit(8)
+
+if (allNotes?.length) {
+  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
+  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
+} else {
+  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
+}
+```
+
+**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
+Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
+
+**E — Melhorar o match com busca por palavras individuais**
+Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
+
+```typescript
+// Fallback: tenta match por primeira palavra significativa
+if (!matchingTasks?.length) {
+  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
+  if (words.length > 0) {
+    const { data: fallbackTasks } = await supabase
+      .from('tasks')
+      .select('id, title')
+      .eq('workspace_id', workspace_id)
+      .ilike('title', `%${words[0]}%`)
+      .limit(1)
+    // use fallbackTasks if found
+  }
+}
+```
+
+---
+
+### Resumo dos arquivos
+
+```
+MOD  supabase/functions/process-message/index.ts
+  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
+  B — handler delete_task: quando não encontra, lista tarefas disponíveis
+  C — handler delete_note: quando não encontra, lista notas recentes  
+  D — system prompt: instrução "excluir lembrete = cancel_reminder"
+  E — handlers delete_task + delete_note: fallback de busca por palavra individual
+```
+
+Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.

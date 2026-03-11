@@ -3,6 +3,7 @@ import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { AppSidebar } from '@/components/AppSidebar'
 import { TopBar } from '@/components/TopBar'
+import CommandPalette from '@/components/CommandPalette'
 
 interface SidebarContextType {
   mobileOpen: boolean
@@ -21,6 +22,7 @@ export const useSidebarCtx = () => useContext(SidebarContext)
 const AppLayout: React.FC = () => {
   const { session, loading } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [cmdOpen, setCmdOpen] = useState(false)
 
   if (loading) {
     return (
@@ -44,6 +46,8 @@ const AppLayout: React.FC = () => {
       toggleMobile: () => setMobileOpen(v => !v),
       closeMobile: () => setMobileOpen(false),
     }}>
+      <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+
       <div className="flex h-screen bg-background overflow-hidden">
         <AppSidebar />
 
@@ -56,7 +60,7 @@ const AppLayout: React.FC = () => {
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <TopBar />
+          <TopBar onOpenSearch={() => setCmdOpen(true)} />
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 animate-fade-in">
             <Outlet />
           </main>

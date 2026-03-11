@@ -20,6 +20,7 @@ import SettingsPage from "@/pages/app/Settings"
 import LogsPage from "@/pages/app/Logs"
 import RemindersPage from "@/pages/app/Reminders"
 import ContactsPage from "@/pages/app/Contacts"
+import AIChatPage from "@/pages/app/AIChat"
 import NotFound from "./pages/NotFound"
 
 const queryClient = new QueryClient({
@@ -51,6 +52,7 @@ const App = () => (
                 <Route path="/app/whitelist" element={<ErrorBoundary fallbackTitle="Erro na Whitelist"><WhitelistPage /></ErrorBoundary>} />
                 <Route path="/app/settings" element={<ErrorBoundary fallbackTitle="Erro nas Configurações"><SettingsPage /></ErrorBoundary>} />
                 <Route path="/app/logs" element={<ErrorBoundary fallbackTitle="Erro nos Logs"><LogsPage /></ErrorBoundary>} />
+                <Route path="/app/ai-chat" element={<ErrorBoundary fallbackTitle="Erro no Chat IA"><AIChatPage /></ErrorBoundary>} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
