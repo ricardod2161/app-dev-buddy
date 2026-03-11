@@ -1,7 +1,9 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "whatsapp-assistant",
+  "description": "Assistente pessoal de produtividade integrado ao WhatsApp e Telegram com IA",
+  "author": "Paulo Ricardo Dantas de Lima",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

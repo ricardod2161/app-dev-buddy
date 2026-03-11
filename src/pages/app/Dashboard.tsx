@@ -11,7 +11,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { FileText, CheckSquare, Bell, MessageSquare, Clock, TrendingDown } from 'lucide-react'
+import { FileText, CheckSquare, Bell, MessageSquare, Clock, TrendingDown, Bot } from 'lucide-react'
 import { format, subDays, startOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { stripHtml, truncate } from '@/lib/utils'
@@ -156,6 +156,31 @@ const DashboardPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  // AI response time metrics (last 24h from webhook_logs)
+  const { data: aiMetrics, isLoading: loadingAiMetrics } = useQuery({
+    queryKey: ['dashboard-ai-metrics', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return null
+      const { data } = await supabase
+        .from('webhook_logs')
+        .select('response_ms, ai_model, ai_action')
+        .eq('workspace_id', workspaceId)
+        .not('response_ms', 'is', null)
+        .gte('created_at', today)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (!data || data.length === 0) return null
+      const validMs = data.map(r => r.response_ms!).filter(v => v > 0)
+      const avg = validMs.length > 0 ? Math.round(validMs.reduce((a, b) => a + b, 0) / validMs.length) : 0
+      const modelCount: Record<string, number> = {}
+      data.forEach(r => { if (r.ai_model) modelCount[r.ai_model] = (modelCount[r.ai_model] ?? 0) + 1 })
+      const topModel = Object.entries(modelCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+      const shortModel = topModel.includes('flash') ? 'Flash' : topModel.includes('pro') ? 'Pro' : topModel.split('/').pop() ?? topModel
+      return { total: data.length, avgMs: avg, topModel: shortModel }
+    },
+    enabled: !!workspaceId,
+  })
+
   // Recent activity
   const { data: recentNotes } = useQuery({
     queryKey: ['dashboard-recent-notes', workspaceId],
@@ -200,7 +225,7 @@ const DashboardPage: React.FC = () => {
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 xl:grid-cols-6 gap-3 sm:gap-4">
         {metrics.map(({ label, value, icon: Icon, loading, color, bg, isText }) => (
           <Card key={label} className="hover:shadow-md transition-shadow">
             <CardContent className="p-4 sm:p-5">
@@ -219,6 +244,31 @@ const DashboardPage: React.FC = () => {
             </CardContent>
           </Card>
         ))}
+
+        {/* AI Metrics Card */}
+        <Card className="hover:shadow-md transition-shadow col-span-2 xl:col-span-1">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start justify-between mb-3">
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground leading-tight">IA Hoje</p>
+              <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center shrink-0">
+                <Bot className="w-4 h-4 text-primary" />
+              </div>
+            </div>
+            {loadingAiMetrics
+              ? <Skeleton className="h-8 w-20" />
+              : aiMetrics
+                ? (
+                  <div className="space-y-0.5">
+                    <p className="text-2xl sm:text-3xl font-bold text-foreground">{aiMetrics.total}</p>
+                    <p className="text-xs text-muted-foreground">
+                      ~{aiMetrics.avgMs < 1000 ? `${aiMetrics.avgMs}ms` : `${(aiMetrics.avgMs / 1000).toFixed(1)}s`} · {aiMetrics.topModel}
+                    </p>
+                  </div>
+                )
+                : <p className="text-2xl font-bold text-foreground">—</p>
+            }
+          </CardContent>
+        </Card>
       </div>
 
       {/* Charts */}

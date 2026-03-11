@@ -1,64 +1,120 @@
 
-## Assessment: What actually needs to be done
+## Diagnóstico: Delete já existe — problema é na experiência
 
-The codebase is already well-built — it has working auth, Supabase integration, all pages, proper TypeScript, Zod forms, TanStack Query, dark/light theme, and a good sidebar. The user's prompt is a generic "refactor everything" request, but applying it blindly would break a working production system.
+O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
 
-**What is already correct (do NOT change):**
-- App.tsx and main.tsx are complete and working
-- AuthContext is functional (the setTimeout is intentional to handle DB trigger race conditions)
-- All 11 pages exist and work
-- Type safety is already good
-- shadcn/ui + Tailwind design is already clean
-- RLS policies, edge functions, and Supabase integration are production-ready
+### Problemas identificados
 
-**What can realistically be improved without breaking things:**
+**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
+O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
 
-### 1. `package.json` — metadata update
-- Change `name` to `"whatsapp-assistant"` (reflects actual product)
-- Add `description` and `author`
+**2. Match parcial pode falhar em casos reais**
+A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
 
-### 2. `README.md` — complete rewrite
-- Modern README with features, stack, setup guide, architecture overview
+**3. Erro "não encontrei" não ajuda o usuário**
+Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
 
-### 3. `.env.example` — create new file
-- Add example env vars so other developers know what's needed
-- `.gitignore` already ignores `.env`
+**4. Sem confirmação antes de deletar**
+A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
 
-### 4. `src/App.tsx` — add ErrorBoundary
-- Wrap each route's page component in a per-route ErrorBoundary class component
-- This prevents one broken page from crashing the entire app
-- No architecture changes needed
+**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
 
-### 5. `src/pages/app/Dashboard.tsx` — add response time chart
-- Add a small "Tempo de Resposta IA" card using the new `webhook_logs` data (ai_model, response_ms)
-- Uses the same pattern as existing Recharts charts already in the page
+---
 
-### 6. `src/components/AppSidebar.tsx` — visual grouping
-- Add visual section separators between groups: Core (Dashboard, Notes, Tasks, Reminders), Reports/Conversations, and Settings/Admin
-- Small cosmetic improvement, no structural change
+### O que será feito
 
-### 7. `src/index.css` — add missing animations
-- Add `animate-slide-up` keyframe (used in several pages but may be missing from CSS)
-- Verify `animate-fade-in` exists
+**Arquivo:** `supabase/functions/process-message/index.ts`
 
-### Files to change:
+**A — Adicionar seção explícita no system prompt para deleção**
+Antes das "Regras de Ouro", adicionar:
+
 ```
-MOD  package.json              — name, description, author
-NEW  README.md                 — complete rewrite
-NEW  .env.example              — document required env vars
-MOD  src/App.tsx               — add ErrorBoundary wrapping routes
-NEW  src/components/ErrorBoundary.tsx  — class component ErrorBoundary
-MOD  src/components/AppSidebar.tsx     — add section separators
-MOD  src/pages/app/Dashboard.tsx       — add AI response time mini-card using webhook_logs
+## Exclusão de Itens — OBRIGATÓRIO
+Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
+- Tarefa → use delete_task com o título completo ou parte do título
+- Nota → use delete_note com o título
+- Lembrete → use cancel_reminder
+
+Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
+"não preciso mais de", "cancela", "remove", "zera", "descarta"
+
+ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
+para o usuário escolher — não retorne erro vazio.
 ```
 
-### What I will NOT do (would break production):
-- Migrate to feature-folder structure — would require updating dozens of imports across all files, very high risk, no functional benefit
-- Remove AuthContext setTimeout — it's there intentionally to handle DB trigger race conditions on signup
-- Move Supabase client — it's already correctly at `@/integrations/supabase/client` (auto-generated)
-- Add Husky/lint-staged — not supported in Lovable environment
-- Add React Query Devtools — minor, and already works fine without it
-- "Kanban preparado para crescer" — Tasks already has full dnd-kit Kanban with 3 columns
+**B — Melhorar o handler `delete_task` quando não encontra**
+Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
 
-### Scope summary
-This is a focused, safe set of improvements that elevates the project's professionalism (README, .env.example, error boundaries, sidebar UX, dashboard AI metrics) without touching what already works.
+```typescript
+// Quando não encontra: lista as tarefas disponíveis
+const { data: allTasks } = await supabase
+  .from('tasks')
+  .select('title, status')
+  .eq('workspace_id', workspace_id)
+  .in('status', ['todo', 'doing'])
+  .order('created_at', { ascending: false })
+  .limit(8)
+
+if (allTasks?.length) {
+  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
+  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
+} else {
+  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
+}
+```
+
+**C — Mesma melhoria para `delete_note`**
+Quando não encontrar a nota, listar as notas recentes:
+
+```typescript
+const { data: allNotes } = await supabase
+  .from('notes')
+  .select('title, category')
+  .eq('workspace_id', workspace_id)
+  .order('created_at', { ascending: false })
+  .limit(8)
+
+if (allNotes?.length) {
+  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
+  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
+} else {
+  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
+}
+```
+
+**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
+Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
+
+**E — Melhorar o match com busca por palavras individuais**
+Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
+
+```typescript
+// Fallback: tenta match por primeira palavra significativa
+if (!matchingTasks?.length) {
+  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
+  if (words.length > 0) {
+    const { data: fallbackTasks } = await supabase
+      .from('tasks')
+      .select('id, title')
+      .eq('workspace_id', workspace_id)
+      .ilike('title', `%${words[0]}%`)
+      .limit(1)
+    // use fallbackTasks if found
+  }
+}
+```
+
+---
+
+### Resumo dos arquivos
+
+```
+MOD  supabase/functions/process-message/index.ts
+  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
+  B — handler delete_task: quando não encontra, lista tarefas disponíveis
+  C — handler delete_note: quando não encontra, lista notas recentes  
+  D — system prompt: instrução "excluir lembrete = cancel_reminder"
+  E — handlers delete_task + delete_note: fallback de busca por palavra individual
+```
+
+Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
