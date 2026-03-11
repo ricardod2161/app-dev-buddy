@@ -254,6 +254,7 @@ const ConversationsPage: React.FC = () => {
                   </div>
                 ))
             }
+            <div ref={messagesEndRef} />
           </div>
         </>
       )}
