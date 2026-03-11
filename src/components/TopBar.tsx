@@ -1,5 +1,5 @@
 import React from 'react'
-import { Moon, Sun, LogOut, Settings, Menu } from 'lucide-react'
+import { Moon, Sun, LogOut, Settings, Menu, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext"
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
 import ErrorBoundary from "@/components/ErrorBoundary"
+import CommandPalette from "@/components/CommandPalette"
 import LoginPage from "@/pages/auth/Login"
 import RegisterPage from "@/pages/auth/Register"
 import DashboardPage from "@/pages/app/Dashboard"
@@ -20,7 +21,9 @@ import SettingsPage from "@/pages/app/Settings"
 import LogsPage from "@/pages/app/Logs"
 import RemindersPage from "@/pages/app/Reminders"
 import ContactsPage from "@/pages/app/Contacts"
+import AIChatPage from "@/pages/app/AIChat"
 import NotFound from "./pages/NotFound"
+import { useState, useEffect } from "react"
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 1000 * 60, retry: 1 } },

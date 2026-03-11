@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, FileText, CheckSquare, BarChart3, MessageSquare,
   Settings, List, Hash, ScrollText, ChevronLeft, ChevronRight,
-  MessageCircle, X, Bell, Users,
+  MessageCircle, X, Bell, Users, Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
