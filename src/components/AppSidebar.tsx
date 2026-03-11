@@ -30,6 +30,7 @@ const navGroups: NavGroup[] = [
       { label: 'Notas', path: '/app/notes', icon: FileText },
       { label: 'Tarefas', path: '/app/tasks', icon: CheckSquare },
       { label: 'Lembretes', path: '/app/reminders', icon: Bell },
+      { label: 'Chat IA', path: '/app/ai-chat', icon: Sparkles },
     ],
   },
   {

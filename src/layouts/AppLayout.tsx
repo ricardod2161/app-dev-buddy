@@ -18,7 +18,12 @@ const SidebarContext = createContext<SidebarContextType>({
 
 export const useSidebarCtx = () => useContext(SidebarContext)
 
-const AppLayout: React.FC = () => {
+interface AppLayoutProps {
+  cmdOpen?: boolean
+  onCmdOpen?: (open: boolean) => void
+}
+
+const AppLayout: React.FC<AppLayoutProps> = ({ onCmdOpen }) => {
   const { session, loading } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -56,7 +61,7 @@ const AppLayout: React.FC = () => {
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <TopBar />
+          <TopBar onOpenSearch={onCmdOpen ? () => onCmdOpen(true) : undefined} />
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 animate-fade-in">
             <Outlet />
           </main>
