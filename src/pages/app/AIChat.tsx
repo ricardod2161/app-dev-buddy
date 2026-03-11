@@ -464,8 +464,8 @@ const AIChat: React.FC = () => {
           setIsStreaming(false)
           if (convId) await saveMessage(convId, 'assistant', accum)
           // Update conversation updated_at
-          await supabase
-            .from('ai_conversations' as never)
+          await sb
+            .from('ai_conversations')
             .update({ updated_at: new Date().toISOString() })
             .eq('id', convId)
           qc.invalidateQueries({ queryKey: ['ai-conversations', workspaceId] })
