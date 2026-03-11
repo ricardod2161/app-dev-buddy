@@ -250,8 +250,8 @@ const DashboardPage: React.FC = () => {
           <CardContent className="p-4 sm:p-5">
             <div className="flex items-start justify-between mb-3">
               <p className="text-xs sm:text-sm font-medium text-muted-foreground leading-tight">IA Hoje</p>
-              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center shrink-0">
-                <Bot className="w-4 h-4 text-blue-500" />
+              <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center shrink-0">
+                <Bot className="w-4 h-4 text-primary" />
               </div>
             </div>
             {loadingAiMetrics
