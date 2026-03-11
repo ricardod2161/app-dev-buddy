@@ -156,6 +156,31 @@ const DashboardPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  // AI response time metrics (last 24h from webhook_logs)
+  const { data: aiMetrics, isLoading: loadingAiMetrics } = useQuery({
+    queryKey: ['dashboard-ai-metrics', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return null
+      const { data } = await supabase
+        .from('webhook_logs')
+        .select('response_ms, ai_model, ai_action')
+        .eq('workspace_id', workspaceId)
+        .not('response_ms', 'is', null)
+        .gte('created_at', today)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (!data || data.length === 0) return null
+      const validMs = data.map(r => r.response_ms!).filter(v => v > 0)
+      const avg = validMs.length > 0 ? Math.round(validMs.reduce((a, b) => a + b, 0) / validMs.length) : 0
+      const modelCount: Record<string, number> = {}
+      data.forEach(r => { if (r.ai_model) modelCount[r.ai_model] = (modelCount[r.ai_model] ?? 0) + 1 })
+      const topModel = Object.entries(modelCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+      const shortModel = topModel.includes('flash') ? 'Flash' : topModel.includes('pro') ? 'Pro' : topModel.split('/').pop() ?? topModel
+      return { total: data.length, avgMs: avg, topModel: shortModel }
+    },
+    enabled: !!workspaceId,
+  })
+
   // Recent activity
   const { data: recentNotes } = useQuery({
     queryKey: ['dashboard-recent-notes', workspaceId],
