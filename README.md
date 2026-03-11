@@ -1,73 +1,131 @@
-# Welcome to your Lovable project
+# 🤖 WhatsApp & Telegram AI Assistant
 
-## Project info
+> Seu assistente pessoal de produtividade inteligente, integrado ao WhatsApp e Telegram.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18-blue?logo=react)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5-purple?logo=vite)](https://vitejs.dev/)
+[![Supabase](https://img.shields.io/badge/Supabase-Cloud-green?logo=supabase)](https://supabase.com/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.x-blue?logo=tailwindcss)](https://tailwindcss.com/)
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
+## ✨ Funcionalidades
 
-**Use Lovable**
+| Módulo | Descrição |
+|---|---|
+| 📊 **Dashboard** | KPIs em tempo real, gráficos de tendência, métricas de IA |
+| 📝 **Notas** | Criadas automaticamente via mensagem de voz ou texto |
+| ✅ **Tarefas** | Kanban drag-and-drop com prioridade e prazos |
+| 🔔 **Lembretes** | Agendamento natural de linguagem ("amanhã às 9h") |
+| 💬 **Conversas** | Histórico completo WhatsApp + Telegram por contato |
+| 👥 **Contatos** | Agenda com tags e anotações |
+| 📈 **Relatórios** | Resumo semanal gerado por IA |
+| 🔌 **Integrações** | Conecte WhatsApp (Evolution API) e Telegram Bot |
+| 📋 **Whitelist** | Controle quais números podem usar o assistente |
+| 📟 **Logs** | Monitoramento em tempo real com métricas de IA (modelo, tempo, ação) |
+| ⚙️ **Configurações** | Personalidade do bot, fuso, idioma, voz TTS |
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+---
 
-Changes made via Lovable will be committed automatically to this repo.
+## 🏗️ Stack
 
-**Use your preferred IDE**
+- **Frontend**: React 18 + TypeScript + Vite
+- **UI**: shadcn/ui + Tailwind CSS + Radix UI
+- **State**: TanStack Query (React Query v5)
+- **Forms**: React Hook Form + Zod
+- **Charts**: Recharts
+- **Drag & Drop**: @dnd-kit
+- **Backend**: Supabase (Lovable Cloud) — Postgres + RLS + Edge Functions + Realtime
+- **Messaging**: Evolution API (WhatsApp) + Telegram Bot API
+- **AI**: Google Gemini (via Lovable AI Gateway)
+- **TTS**: ElevenLabs
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+---
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## 🚀 Rodando localmente
 
-Follow these steps:
+### Pré-requisitos
+- Node.js ≥ 18
+- npm ≥ 9
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
+```bash
+# 1. Clone o repositório
 git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
 cd <YOUR_PROJECT_NAME>
 
-# Step 3: Install the necessary dependencies.
-npm i
+# 2. Instale as dependências
+npm install
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# 3. Configure as variáveis de ambiente
+cp .env.example .env
+# Edite .env com suas credenciais do Supabase
+
+# 4. Inicie o servidor de desenvolvimento
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Acesse `http://localhost:5173`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Comandos disponíveis
 
-**Use GitHub Codespaces**
+```bash
+npm run dev        # Servidor de desenvolvimento
+npm run build      # Build de produção
+npm run preview    # Preview do build
+npm run lint       # Verificar erros de lint
+npm run test       # Rodar testes
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+---
 
-## What technologies are used for this project?
+## 📁 Estrutura do Projeto
 
-This project is built with:
+```
+src/
+├── components/       # Componentes compartilhados (Sidebar, TopBar, ErrorBoundary…)
+│   └── ui/           # shadcn/ui primitives
+├── contexts/         # AuthContext, ThemeContext
+├── hooks/            # Hooks customizados
+├── layouts/          # AppLayout, AuthLayout
+├── lib/              # Utilitários (utils.ts)
+├── pages/
+│   ├── app/          # Páginas protegidas (Dashboard, Tasks, Notes…)
+│   └── auth/         # Login, Register
+└── types/            # TypeScript types e interfaces
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+supabase/
+├── functions/        # Edge Functions (webhooks, process-message, reports…)
+└── migrations/       # SQL migrations versionadas
+```
 
-## How can I deploy this project?
+---
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## 🔐 Segurança
 
-## Can I connect a custom domain to my Lovable project?
+- Row Level Security (RLS) ativo em todas as tabelas
+- Tokens e chaves de API armazenados como secrets no servidor (nunca expostos ao frontend)
+- Autenticação via Supabase Auth com JWT
+- Whitelist de números para controle de acesso ao bot
 
-Yes, you can!
+---
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## 🗺️ Roadmap
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- [ ] Suporte a múltiplos workspaces com convite por e-mail
+- [ ] Integração com Google Calendar para lembretes
+- [ ] Modo offline com sync quando reconectar
+- [ ] App mobile (PWA)
+- [ ] Dashboard de gastos com categorias automáticas por IA
+
+---
+
+## 👤 Autor
+
+**Paulo Ricardo Dantas de Lima**
+
+---
+
+## 📄 Licença
+
+Privado — todos os direitos reservados.
