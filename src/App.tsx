@@ -52,7 +52,7 @@ function AppWithPalette() {
           <Route path="/auth/login" element={<ErrorBoundary fallbackTitle="Erro na tela de login"><LoginPage /></ErrorBoundary>} />
           <Route path="/auth/register" element={<ErrorBoundary fallbackTitle="Erro no cadastro"><RegisterPage /></ErrorBoundary>} />
         </Route>
-        <Route element={<AppLayout cmdOpen={cmdOpen} onCmdOpen={setCmdOpen} />}>
+        <Route element={<AppLayout />}>
           <Route path="/app" element={<ErrorBoundary fallbackTitle="Erro no Dashboard"><DashboardPage /></ErrorBoundary>} />
           <Route path="/app/notes" element={<ErrorBoundary fallbackTitle="Erro nas Notas"><NotesPage /></ErrorBoundary>} />
           <Route path="/app/tasks" element={<ErrorBoundary fallbackTitle="Erro nas Tarefas"><TasksPage /></ErrorBoundary>} />
