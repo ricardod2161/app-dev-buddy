@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
@@ -16,7 +16,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Pencil, Trash2, ArrowRight, Search, X, FileText } from 'lucide-react'
+import { Plus, Trash2, ArrowRight, Search, X, FileText, Check, ChevronDown, ChevronUp, Bold, Italic, List, Code2 } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -35,62 +35,262 @@ const RichEditor: React.FC<{ content: string; onChange: (v: string) => void }> =
   })
 
   return (
-    <div className="border rounded-md">
-      <div className="flex gap-1 p-2 border-b bg-muted/50">
+    <div className="border rounded-md bg-background">
+      <div className="flex gap-1 p-1.5 border-b bg-muted/40">
         {[
-          { label: 'N', title: 'Negrito', action: () => editor?.chain().focus().toggleBold().run(), active: editor?.isActive('bold') },
-          { label: 'I', title: 'Itálico', action: () => editor?.chain().focus().toggleItalic().run(), active: editor?.isActive('italic') },
-          { label: '•', title: 'Lista', action: () => editor?.chain().focus().toggleBulletList().run(), active: editor?.isActive('bulletList') },
-          { label: '<>', title: 'Código', action: () => editor?.chain().focus().toggleCode().run(), active: editor?.isActive('code') },
-        ].map(({ label, title, action, active }) => (
+          { icon: <Bold className="w-3.5 h-3.5" />, title: 'Negrito', action: () => editor?.chain().focus().toggleBold().run(), active: editor?.isActive('bold') },
+          { icon: <Italic className="w-3.5 h-3.5" />, title: 'Itálico', action: () => editor?.chain().focus().toggleItalic().run(), active: editor?.isActive('italic') },
+          { icon: <List className="w-3.5 h-3.5" />, title: 'Lista', action: () => editor?.chain().focus().toggleBulletList().run(), active: editor?.isActive('bulletList') },
+          { icon: <Code2 className="w-3.5 h-3.5" />, title: 'Código', action: () => editor?.chain().focus().toggleCode().run(), active: editor?.isActive('code') },
+        ].map(({ icon, title, action, active }) => (
           <button
             key={title}
             type="button"
             title={title}
             onClick={action}
-            className={`px-2 py-1 text-sm rounded font-mono transition-colors ${active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+            className={`px-2 py-1 rounded transition-colors ${active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground hover:text-foreground'}`}
           >
-            {label}
+            {icon}
           </button>
         ))}
       </div>
       <EditorContent
         editor={editor}
-        className="p-3 min-h-[120px] prose prose-sm dark:prose-invert max-w-none [&_.ProseMirror]:outline-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none"
+        className="p-3 min-h-[100px] prose prose-sm dark:prose-invert max-w-none [&_.ProseMirror]:outline-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none"
       />
     </div>
   )
 }
 
-// --- Modal de Nota ---
-interface NoteModalProps {
-  note?: Note | null
+// --- Inline Editable Note Card ---
+interface NoteCardProps {
+  note: Note
+  categories: string[]
+  workspaceId: string
+  onDelete: (note: Note) => void
+  onConvertToTask: (note: Note) => void
+}
+
+const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDelete, onConvertToTask }) => {
+  const qc = useQueryClient()
+  const [expanded, setExpanded] = useState(false)
+  const [title, setTitle] = useState(note.title ?? '')
+  const [content, setContent] = useState(note.content ?? '')
+  const [category, setCategory] = useState(note.category ?? 'none')
+  const [project, setProject] = useState(note.project ?? '')
+  const [tags, setTags] = useState<string[]>((note.tags as string[]) ?? [])
+  const [tagInput, setTagInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  const markDirty = useCallback(() => setDirty(true), [])
+
+  const addTag = () => {
+    const t = tagInput.trim()
+    if (t && !tags.includes(t)) { setTags(prev => [...prev, t]); markDirty() }
+    setTagInput('')
+  }
+
+  const save = async () => {
+    if (!title.trim()) { toast.error('Título é obrigatório'); return }
+    setSaving(true)
+    const catValue = category === 'none' ? null : category
+    try {
+      const { error } = await supabase
+        .from('notes')
+        .update({ title, content, category: catValue, project, tags })
+        .eq('id', note.id)
+      if (error) throw error
+      toast.success('Nota salva')
+      qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
+      setDirty(false)
+      setExpanded(false)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const cancel = () => {
+    setTitle(note.title ?? '')
+    setContent(note.content ?? '')
+    setCategory(note.category ?? 'none')
+    setProject(note.project ?? '')
+    setTags((note.tags as string[]) ?? [])
+    setTagInput('')
+    setDirty(false)
+    setExpanded(false)
+  }
+
+  const preview = truncate(stripHtml(note.content ?? ''), 120)
+
+  return (
+    <Card className={`transition-all duration-200 ${expanded ? 'shadow-md ring-1 ring-primary/20' : 'hover:shadow-md hover:-translate-y-0.5'}`}>
+      <CardContent className="py-4 px-5">
+        {!expanded ? (
+          /* --- Collapsed view (click to expand) --- */
+          <div
+            className="cursor-pointer"
+            onClick={() => setExpanded(true)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => e.key === 'Enter' && setExpanded(true)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-foreground truncate">{title || '(sem título)'}</h3>
+                {preview && (
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{preview}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  {note.category && <Badge variant="outline" className="text-xs">{note.category}</Badge>}
+                  {note.project && <span className="text-xs text-muted-foreground">📁 {note.project}</span>}
+                  {(note.tags as string[]).map(tag => (
+                    <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                  ))}
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    {format(new Date(note.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                  </span>
+                </div>
+              </div>
+              <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Transformar em tarefa"
+                  onClick={() => onConvertToTask(note)}>
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir"
+                  onClick={() => onDelete(note)}>
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" title="Expandir">
+                  <ChevronDown className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* --- Expanded inline editor --- */
+          <div className="space-y-3">
+            {/* Title */}
+            <div className="flex items-center gap-2">
+              <Input
+                value={title}
+                onChange={e => { setTitle(e.target.value); markDirty() }}
+                placeholder="Título da nota"
+                className="text-base font-semibold border-0 border-b rounded-none px-0 focus-visible:ring-0 focus-visible:border-primary bg-transparent"
+                autoFocus
+              />
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground" onClick={cancel} title="Fechar">
+                <ChevronUp className="w-4 h-4" />
+              </Button>
+            </div>
+
+            {/* Rich content */}
+            <RichEditor content={content} onChange={v => { setContent(v); markDirty() }} />
+
+            {/* Category + Project */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs text-muted-foreground">Categoria</Label>
+                <Select value={category} onValueChange={v => { setCategory(v); markDirty() }}>
+                  <SelectTrigger className="mt-1 h-8 text-xs">
+                    <SelectValue placeholder="Selecionar..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem categoria</SelectItem>
+                    {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Projeto</Label>
+                <Input
+                  value={project}
+                  onChange={e => { setProject(e.target.value); markDirty() }}
+                  placeholder="Nome do projeto"
+                  className="mt-1 h-8 text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div>
+              <Label className="text-xs text-muted-foreground">Tags</Label>
+              <div className="flex gap-2 mt-1">
+                <Input
+                  value={tagInput}
+                  onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                  placeholder="Adicionar tag..."
+                  className="h-8 text-xs"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addTag} className="h-8">+</Button>
+              </div>
+              {tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {tags.map(tag => (
+                    <Badge key={tag} variant="secondary" className="gap-1 text-xs">
+                      {tag}
+                      <button onClick={() => { setTags(prev => prev.filter(t => t !== tag)); markDirty() }}>
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-1 border-t">
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
+                  onClick={() => onDelete(note)}>
+                  <Trash2 className="w-3 h-3 mr-1" /> Excluir
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground"
+                  onClick={() => onConvertToTask(note)}>
+                  <ArrowRight className="w-3 h-3 mr-1" /> Transformar em Tarefa
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancel}>Cancelar</Button>
+                <Button size="sm" className="h-7 text-xs gap-1" onClick={save} disabled={saving || !dirty}>
+                  <Check className="w-3 h-3" />
+                  {saving ? 'Salvando...' : 'Salvar'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// --- Modal Nova Nota ---
+interface NewNoteModalProps {
   open: boolean
   onClose: () => void
   workspaceId: string
   categories: string[]
 }
 
-const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId, categories }) => {
+const NewNoteModal: React.FC<NewNoteModalProps> = ({ open, onClose, workspaceId, categories }) => {
   const qc = useQueryClient()
-  const [title, setTitle] = useState(note?.title ?? '')
-  const [content, setContent] = useState(note?.content ?? '')
-  const [category, setCategory] = useState(note?.category ?? 'none')
-  const [project, setProject] = useState(note?.project ?? '')
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [category, setCategory] = useState('none')
+  const [project, setProject] = useState('')
   const [tagInput, setTagInput] = useState('')
-  const [tags, setTags] = useState<string[]>(note?.tags ?? [])
+  const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
   React.useEffect(() => {
-    if (open) {
-      setTitle(note?.title ?? '')
-      setContent(note?.content ?? '')
-      setCategory(note?.category ?? 'none')
-      setProject(note?.project ?? '')
-      setTags(note?.tags ?? [])
-      setTagInput('')
-    }
-  }, [open, note])
+    if (open) { setTitle(''); setContent(''); setCategory('none'); setProject(''); setTags([]); setTagInput('') }
+  }, [open])
 
   const addTag = () => {
     const t = tagInput.trim()
@@ -103,21 +303,15 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
     setLoading(true)
     const catValue = category === 'none' ? null : category
     try {
-      if (note) {
-        const { error } = await supabase.from('notes').update({ title, content, category: catValue, project, tags }).eq('id', note.id)
-        if (error) throw error
-        toast.success('Nota atualizada')
-      } else {
-        const { error } = await supabase.from('notes').insert({ workspace_id: workspaceId, title, content, category: catValue, project, tags })
-        if (error) throw error
-        toast.success('Nota criada')
-      }
+      const { error } = await supabase.from('notes').insert({ workspace_id: workspaceId, title, content, category: catValue, project, tags })
+      if (error) throw error
+      toast.success('Nota criada')
       qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
       onClose()
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao salvar nota')
+      toast.error(e instanceof Error ? e.message : 'Erro ao criar nota')
     } finally {
       setLoading(false)
     }
@@ -127,26 +321,22 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{note ? 'Editar Nota' : 'Nova Nota'}</DialogTitle>
+          <DialogTitle>Nova Nota</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div>
             <Label>Título *</Label>
-            <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título da nota" className="mt-1" />
+            <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Título da nota" className="mt-1" autoFocus />
           </div>
           <div>
             <Label>Conteúdo</Label>
-            <div className="mt-1">
-              <RichEditor content={content} onChange={setContent} />
-            </div>
+            <div className="mt-1"><RichEditor content={content} onChange={setContent} /></div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Categoria</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Selecionar..." />
-                </SelectTrigger>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Selecionar..." /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sem categoria</SelectItem>
                   {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
@@ -161,12 +351,8 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
           <div>
             <Label>Tags</Label>
             <div className="flex gap-2 mt-1">
-              <Input
-                value={tagInput}
-                onChange={e => setTagInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                placeholder="Adicionar tag..."
-              />
+              <Input value={tagInput} onChange={e => setTagInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())} placeholder="Adicionar tag..." />
               <Button type="button" variant="outline" onClick={addTag}>Adicionar</Button>
             </div>
             <div className="flex flex-wrap gap-1 mt-2">
@@ -181,7 +367,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ note, open, onClose, workspaceId,
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} disabled={loading}>{loading ? 'Salvando...' : 'Salvar'}</Button>
+          <Button onClick={save} disabled={loading}>{loading ? 'Salvando...' : 'Criar Nota'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -259,8 +445,7 @@ const NotesPage: React.FC = () => {
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterProject, setFilterProject] = useState('all')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editNote, setEditNote] = useState<Note | null>(null)
+  const [newNoteOpen, setNewNoteOpen] = useState(false)
   const [deleteNote, setDeleteNote] = useState<Note | null>(null)
   const [taskNote, setTaskNote] = useState<Note | null>(null)
 
@@ -339,7 +524,7 @@ const NotesPage: React.FC = () => {
             </Select>
           )}
         </div>
-        <Button onClick={() => { setEditNote(null); setModalOpen(true) }} className="shrink-0">
+        <Button onClick={() => setNewNoteOpen(true)} className="shrink-0">
           <Plus className="w-4 h-4 mr-2" /> Nova Nota
         </Button>
       </div>
@@ -355,66 +540,33 @@ const NotesPage: React.FC = () => {
             icon={FileText}
             title="Nenhuma nota encontrada"
             description={search || filterCategory !== 'all' ? 'Tente ajustar os filtros de busca.' : 'Crie sua primeira nota clicando em "Nova Nota".'}
-            action={!search && filterCategory === 'all' ? { label: 'Nova Nota', onClick: () => { setEditNote(null); setModalOpen(true) } } : undefined}
+            action={!search && filterCategory === 'all' ? { label: 'Nova Nota', onClick: () => setNewNoteOpen(true) } : undefined}
           />
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3">
-          {filtered.map(note => {
-            const preview = truncate(stripHtml(note.content ?? ''), 100)
-            return (
-              <Card key={note.id} className="hover:shadow-md transition-all hover:-translate-y-0.5 duration-150">
-                <CardContent className="py-4 px-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground truncate">{note.title ?? '(sem título)'}</h3>
-                      {preview && (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{preview}</p>
-                      )}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                        {note.category && <Badge variant="outline" className="text-xs">{note.category}</Badge>}
-                        {note.project && <span className="text-xs text-muted-foreground">📁 {note.project}</span>}
-                        {(note.tags as string[]).map(tag => (
-                          <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                        ))}
-                        <span className="text-xs text-muted-foreground ml-auto">
-                          {format(new Date(note.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Transformar em tarefa"
-                        onClick={() => setTaskNote(note)}>
-                        <ArrowRight className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Editar"
-                        onClick={() => { setEditNote(note); setModalOpen(true) }}>
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir"
-                        onClick={() => setDeleteNote(note)}>
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+          {workspaceId && filtered.map(note => (
+            <NoteCard
+              key={note.id}
+              note={note}
+              categories={categories}
+              workspaceId={workspaceId}
+              onDelete={setDeleteNote}
+              onConvertToTask={setTaskNote}
+            />
+          ))}
         </div>
       )}
 
       {/* Modais */}
       {workspaceId && (
         <>
-          <NoteModal
-            note={editNote}
-            open={modalOpen}
-            onClose={() => { setModalOpen(false); setEditNote(null) }}
+          <NewNoteModal
+            open={newNoteOpen}
+            onClose={() => setNewNoteOpen(false)}
             workspaceId={workspaceId}
             categories={categories}
           />
-
           {taskNote && (
             <TaskFromNoteModal
               note={taskNote}
