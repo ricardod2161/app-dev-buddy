@@ -225,7 +225,7 @@ const DashboardPage: React.FC = () => {
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 xl:grid-cols-6 gap-3 sm:gap-4">
         {metrics.map(({ label, value, icon: Icon, loading, color, bg, isText }) => (
           <Card key={label} className="hover:shadow-md transition-shadow">
             <CardContent className="p-4 sm:p-5">
