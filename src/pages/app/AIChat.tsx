@@ -309,8 +309,9 @@ const AIChat: React.FC = () => {
     queryKey: ['ai-conversations', workspaceId],
     queryFn: async () => {
       if (!workspaceId) return []
-      const { data, error } = await supabase
-        .from('ai_conversations' as never)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from('ai_conversations')
         .select('*')
         .eq('workspace_id', workspaceId)
         .order('updated_at', { ascending: false })
