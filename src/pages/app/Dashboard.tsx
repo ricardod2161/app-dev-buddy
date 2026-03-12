@@ -258,14 +258,36 @@ const DashboardPage: React.FC = () => {
               ? <Skeleton className="h-8 w-20" />
               : aiMetrics
                 ? (
-                  <div className="space-y-0.5">
+                  <div className="space-y-1">
                     <p className="text-2xl sm:text-3xl font-bold text-foreground">{aiMetrics.total}</p>
                     <p className="text-xs text-muted-foreground">
                       ~{aiMetrics.avgMs < 1000 ? `${aiMetrics.avgMs}ms` : `${(aiMetrics.avgMs / 1000).toFixed(1)}s`} · {aiMetrics.topModel}
                     </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1 text-xs text-primary gap-1 -ml-1 mt-1"
+                      onClick={() => navigate('/app/ai-chat')}
+                    >
+                      <Sparkles className="w-3 h-3" />Abrir Chat IA
+                      <ArrowRight className="w-3 h-3" />
+                    </Button>
                   </div>
                 )
-                : <p className="text-2xl font-bold text-foreground">—</p>
+                : (
+                  <div className="space-y-1">
+                    <p className="text-2xl font-bold text-foreground">—</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1 text-xs text-primary gap-1 -ml-1"
+                      onClick={() => navigate('/app/ai-chat')}
+                    >
+                      <Sparkles className="w-3 h-3" />Abrir Chat IA
+                      <ArrowRight className="w-3 h-3" />
+                    </Button>
+                  </div>
+                )
             }
           </CardContent>
         </Card>

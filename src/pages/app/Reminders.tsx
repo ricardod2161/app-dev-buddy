@@ -1,23 +1,38 @@
 import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import * as chrono from 'chrono-node'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'
+import { Label } from '@/components/ui/label'
 import { Bell, Plus, X, Loader2, Calendar, Phone, Clock } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 
+// ── Schema ───────────────────────────────────────────────────────────────────
+const reminderSchema = z.object({
+  title: z.string().optional(),
+  message: z.string().min(1, 'Mensagem é obrigatória'),
+  channel: z.enum(['whatsapp', 'telegram']),
+  target_phone: z.string().optional(),
+  remind_at: z.string().min(1, 'Data/hora é obrigatória'),
+})
+type ReminderForm = z.infer<typeof reminderSchema>
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface Reminder {
   id: string
   workspace_id: string
@@ -43,13 +58,18 @@ const RemindersPage: React.FC = () => {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [naturalDate, setNaturalDate] = useState('')
-  const [parsedDate, setParsedDate] = useState('')
-  const [title, setTitle] = useState('')
-  const [message, setMessage] = useState('')
-  const [channel, setChannel] = useState('whatsapp')
-  const [phone, setPhone] = useState('')
-  const [saving, setSaving] = useState(false)
   const [filterStatus, setFilterStatus] = useState('all')
+
+  const form = useForm<ReminderForm>({
+    resolver: zodResolver(reminderSchema),
+    defaultValues: {
+      title: '',
+      message: '',
+      channel: 'whatsapp',
+      target_phone: '',
+      remind_at: '',
+    },
+  })
 
   const { data: reminders, isLoading } = useQuery({
     queryKey: ['reminders', workspaceId, filterStatus],
@@ -68,46 +88,32 @@ const RemindersPage: React.FC = () => {
     setNaturalDate(value)
     const parsed = chrono.pt.parseDate(value, new Date(), { forwardDate: true })
     if (parsed) {
-      // Format as datetime-local value
       const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000)
         .toISOString().slice(0, 16)
-      setParsedDate(local)
-    } else {
-      setParsedDate('')
+      form.setValue('remind_at', local, { shouldValidate: true })
     }
   }
 
-  const resetForm = () => {
-    setTitle('')
-    setMessage('')
-    setChannel('whatsapp')
-    setPhone('')
+  const handleOpen = () => {
     setNaturalDate('')
-    setParsedDate('')
+    form.reset({ title: '', message: '', channel: 'whatsapp', target_phone: '', remind_at: '' })
+    setOpen(true)
   }
 
-  const save = async () => {
+  const onSubmit = async (values: ReminderForm) => {
     if (!workspaceId) return
-    if (!message.trim()) { toast.error('Mensagem obrigatória'); return }
-    if (!parsedDate && !naturalDate) { toast.error('Data/hora obrigatória'); return }
-
-    const remindAt = parsedDate
-      ? new Date(parsedDate).toISOString()
-      : new Date(naturalDate).toISOString()
-
+    const remindAt = new Date(values.remind_at).toISOString()
     if (new Date(remindAt) <= new Date()) {
-      toast.error('A data deve ser no futuro')
+      form.setError('remind_at', { message: 'A data deve ser no futuro' })
       return
     }
-
-    setSaving(true)
     try {
       const { error } = await supabase.from('reminders').insert({
         workspace_id: workspaceId,
-        title: title || null,
-        message,
-        channel,
-        target_phone: phone || null,
+        title: values.title || null,
+        message: values.message,
+        channel: values.channel,
+        target_phone: values.target_phone || null,
         remind_at: remindAt,
         status: 'scheduled',
       })
@@ -115,11 +121,8 @@ const RemindersPage: React.FC = () => {
       toast.success('Lembrete agendado!')
       qc.invalidateQueries({ queryKey: ['reminders', workspaceId] })
       setOpen(false)
-      resetForm()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -141,6 +144,8 @@ const RemindersPage: React.FC = () => {
     }
   }
 
+  const currentRemindAt = form.watch('remind_at')
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -148,7 +153,7 @@ const RemindersPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-foreground">Lembretes</h1>
           <p className="text-sm text-muted-foreground mt-1">Agende notificações via WhatsApp ou Telegram</p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <Button onClick={handleOpen}>
           <Plus className="w-4 h-4 mr-2" />Novo Lembrete
         </Button>
       </div>
@@ -180,7 +185,7 @@ const RemindersPage: React.FC = () => {
           icon={Bell}
           title="Nenhum lembrete"
           description="Crie um lembrete para ser notificado no horário certo via WhatsApp ou Telegram."
-          action={{ label: 'Criar Lembrete', onClick: () => setOpen(true) }}
+          action={{ label: 'Criar Lembrete', onClick: handleOpen }}
         />
       ) : (
         <div className="space-y-3">
@@ -231,72 +236,106 @@ const RemindersPage: React.FC = () => {
       )}
 
       {/* Create Dialog */}
-      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm() }}>
+      <Dialog open={open} onOpenChange={v => { if (!v) setOpen(false) }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Bell className="w-5 h-5 text-primary" />Novo Lembrete
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Título (opcional)</Label>
-              <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex: Reunião com cliente" className="mt-1" />
-            </div>
-            <div>
-              <Label>Mensagem <span className="text-destructive">*</span></Label>
-              <Textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Texto que será enviado no lembrete..." rows={3} className="mt-1" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Canal</Label>
-                <Select value={channel} onValueChange={setChannel}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                    <SelectItem value="telegram">Telegram</SelectItem>
-                  </SelectContent>
-                </Select>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField control={form.control} name="title" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Título (opcional)</FormLabel>
+                  <FormControl>
+                    <Input {...field} placeholder="Ex: Reunião com cliente" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="message" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Mensagem <span className="text-destructive">*</span></FormLabel>
+                  <FormControl>
+                    <Textarea {...field} placeholder="Texto que será enviado no lembrete..." rows={3} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={form.control} name="channel" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Canal</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                        <SelectItem value="telegram">Telegram</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="target_phone" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Telefone destino</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="+5511999990000" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               </div>
-              <div>
-                <Label>Telefone destino</Label>
-                <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+5511999990000" className="mt-1" />
+
+              {/* Natural language date */}
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1 text-sm font-medium">
+                  <Calendar className="w-3 h-3" />Data/hora em linguagem natural
+                </Label>
+                <Input
+                  value={naturalDate}
+                  onChange={e => handleNaturalDateChange(e.target.value)}
+                  placeholder='Ex: "amanhã às 10h", "sexta às 15:30"'
+                />
+                {currentRemindAt && naturalDate && (
+                  <p className="text-xs text-primary flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    Interpretado: {format(new Date(currentRemindAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                  </p>
+                )}
               </div>
-            </div>
-            <div>
-              <Label className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />Data/hora em linguagem natural
-              </Label>
-              <Input
-                value={naturalDate}
-                onChange={e => handleNaturalDateChange(e.target.value)}
-                placeholder='Ex: "amanhã às 10h", "sexta às 15:30"'
-                className="mt-1"
-              />
-              {parsedDate && (
-                <p className="text-xs text-primary mt-1 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  Interpretado: {format(new Date(parsedDate), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                </p>
-              )}
-            </div>
-            <div>
-              <Label>Ou selecione data/hora manualmente</Label>
-              <Input
-                type="datetime-local"
-                value={parsedDate}
-                onChange={e => { setParsedDate(e.target.value); setNaturalDate('') }}
-                className="mt-1"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setOpen(false); resetForm() }}>Cancelar</Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bell className="w-4 h-4 mr-2" />}
-              Agendar
-            </Button>
-          </DialogFooter>
+
+              <FormField control={form.control} name="remind_at" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Ou selecione data/hora manualmente</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="datetime-local"
+                      {...field}
+                      onChange={e => {
+                        field.onChange(e)
+                        setNaturalDate('')
+                      }}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Agendando...</>
+                    : <><Bell className="w-4 h-4 mr-2" />Agendar</>}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
     </div>
