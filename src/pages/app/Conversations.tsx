@@ -57,6 +57,31 @@ const ConversationsPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  // Load last message per conversation for preview
+  const { data: lastMessages } = useQuery({
+    queryKey: ['last-messages', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return {}
+      const { data } = await supabase
+        .from('messages')
+        .select('conversation_id, body_text, type, direction, created_at')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      const map: Record<string, { text: string; direction: string }> = {}
+      for (const m of data ?? []) {
+        if (!map[m.conversation_id]) {
+          map[m.conversation_id] = {
+            text: m.body_text ?? `[${m.type}]`,
+            direction: m.direction,
+          }
+        }
+      }
+      return map
+    },
+    enabled: !!workspaceId,
+  })
+
   const { data: messages, isLoading: loadingMsgs } = useQuery({
     queryKey: ['messages', workspaceId, selectedId],
     queryFn: async () => {
@@ -168,7 +193,18 @@ const ConversationsPage: React.FC = () => {
                         )}
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <p className="text-xs text-muted-foreground truncate flex-1">{conv.contact_phone}</p>
+                        <p className="text-xs text-muted-foreground truncate flex-1">
+                          {lastMessages?.[conv.id]
+                            ? (
+                              <>
+                                {lastMessages[conv.id].direction === 'OUT' && <span className="text-primary">↩ </span>}
+                                {lastMessages[conv.id].text.length > 35
+                                  ? lastMessages[conv.id].text.slice(0, 35) + '…'
+                                  : lastMessages[conv.id].text}
+                              </>
+                            )
+                            : conv.contact_phone}
+                        </p>
                         <Badge variant="outline" className="text-xs shrink-0 scale-90">{conv.provider}</Badge>
                       </div>
                     </div>

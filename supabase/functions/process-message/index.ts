@@ -5,6 +5,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// ── Module-level integration cache (5-minute TTL) ─────────────────────────────
+const integrationCache = new Map<string, { data: Record<string, unknown>; ts: number }>()
+const CACHE_TTL_MS = 5 * 60 * 1000
+
+function getCachedIntegration(key: string): Record<string, unknown> | null {
+  const entry = integrationCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.ts > CACHE_TTL_MS) { integrationCache.delete(key); return null }
+  return entry.data
+}
+
+function setCachedIntegration(key: string, data: Record<string, unknown>): void {
+  integrationCache.set(key, { data, ts: Date.now() })
+}
+
 interface ProcessMessageBody {
   workspace_id: string
   conversation_id: string
@@ -1512,22 +1527,35 @@ async function sendReply({
   replyText: string
 }) {
   try {
-    const { data: integration } = await supabase
-      .from('integrations')
-      .select('*')
-      .eq('workspace_id', workspace_id)
-      .eq('provider', provider)
-      .eq('is_active', true)
-      .maybeSingle()
+    const cacheKey = `${workspace_id}:${provider}`
+    let integration = getCachedIntegration(cacheKey)
 
     if (!integration) {
-      const { data: fallback } = await supabase
+      const { data } = await supabase
         .from('integrations')
         .select('*')
         .eq('workspace_id', workspace_id)
+        .eq('provider', provider)
         .eq('is_active', true)
-        .in('provider', ['EVOLUTION', 'CLOUD', 'TELEGRAM'])
         .maybeSingle()
+      integration = data as Record<string, unknown> | null
+      if (integration) setCachedIntegration(cacheKey, integration)
+    }
+
+    if (!integration) {
+      const fallbackKey = `${workspace_id}:fallback`
+      let fallback = getCachedIntegration(fallbackKey)
+      if (!fallback) {
+        const { data } = await supabase
+          .from('integrations')
+          .select('*')
+          .eq('workspace_id', workspace_id)
+          .eq('is_active', true)
+          .in('provider', ['EVOLUTION', 'CLOUD', 'TELEGRAM'])
+          .maybeSingle()
+        fallback = data as Record<string, unknown> | null
+        if (fallback) setCachedIntegration(fallbackKey, fallback)
+      }
 
       if (!fallback) {
         console.error('No active integration to send reply')

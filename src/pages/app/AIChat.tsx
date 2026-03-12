@@ -67,13 +67,11 @@ const MODELS = [
   { id: 'openai/gpt-5-mini', label: 'GPT-5 Mini', badge: 'OpenAI' },
 ]
 
-const SUGGESTED_PROMPTS = [
+const FALLBACK_PROMPTS = [
   'Quais são minhas tarefas mais urgentes hoje?',
   'Faça um resumo das minhas notas mais recentes',
   'Me ajuda a planejar minha semana com base nas minhas tarefas abertas',
   'Analisa minha produtividade e dá sugestões de melhoria',
-  'Crie um plano de ação para minhas tarefas em atraso',
-  'Que tipo de projeto você acha que estou trabalhando com base nas minhas notas?',
 ]
 
 // ─── Streaming helper ─────────────────────────────────────────────────────────
@@ -203,27 +201,128 @@ const MessageBubble: React.FC<{
 }> = ({ msg, onRegenerate, isLast }) => {
   const isUser = msg.role === 'user'
 
-  // Render markdown-like formatting
+  // Proper multi-pass markdown renderer
   const renderContent = (content: string) => {
     const lines = content.split('\n')
-    return lines.map((line, i) => {
-      // Code block start/end handled simply
-      if (line.startsWith('```')) {
-        return <div key={i} className="font-mono text-xs bg-muted/50 rounded px-2 py-1 my-1">{line}</div>
-      }
-      // Bold
-      const formatted = line
+    const elements: React.ReactNode[] = []
+    let i = 0
+
+    const applyInline = (text: string, key: string | number): React.ReactNode => {
+      // Handle inline code, bold, italic with dangerouslySetInnerHTML
+      const html = text
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/`(.+?)`/g, '<code class="bg-muted px-1 rounded text-xs font-mono">$1</code>')
-      return (
-        <p
-          key={i}
-          className={cn('leading-relaxed', line.startsWith('# ') && 'font-bold text-base', line.startsWith('## ') && 'font-semibold')}
-          dangerouslySetInnerHTML={{ __html: formatted || '&nbsp;' }}
-        />
+        .replace(/`([^`]+)`/g, '<code style="background:hsl(var(--muted));padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.85em">$1</code>')
+      return <span key={key} dangerouslySetInnerHTML={{ __html: html }} />
+    }
+
+    while (i < lines.length) {
+      const line = lines[i]
+
+      // Fenced code block
+      if (line.startsWith('```')) {
+        const lang = line.slice(3).trim()
+        const codeLines: string[] = []
+        i++
+        while (i < lines.length && !lines[i].startsWith('```')) {
+          codeLines.push(lines[i])
+          i++
+        }
+        elements.push(
+          <div key={`code-${i}`} className="my-2 rounded-lg overflow-hidden border border-border">
+            {lang && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-muted/80 border-b border-border">
+                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">{lang}</span>
+              </div>
+            )}
+            <pre className="bg-muted/50 p-3 overflow-x-auto text-xs font-mono leading-relaxed whitespace-pre text-foreground">
+              <code>{codeLines.join('\n')}</code>
+            </pre>
+          </div>
+        )
+        i++
+        continue
+      }
+
+      // Headings
+      if (line.startsWith('### ')) {
+        elements.push(<h3 key={`h3-${i}`} className="text-sm font-semibold mt-3 mb-1 text-foreground">{applyInline(line.slice(4), `h3i-${i}`)}</h3>)
+        i++; continue
+      }
+      if (line.startsWith('## ')) {
+        elements.push(<h2 key={`h2-${i}`} className="text-base font-bold mt-3 mb-1 text-foreground">{applyInline(line.slice(3), `h2i-${i}`)}</h2>)
+        i++; continue
+      }
+      if (line.startsWith('# ')) {
+        elements.push(<h1 key={`h1-${i}`} className="text-lg font-bold mt-3 mb-2 text-foreground">{applyInline(line.slice(2), `h1i-${i}`)}</h1>)
+        i++; continue
+      }
+
+      // Horizontal rule
+      if (/^---+$/.test(line.trim())) {
+        elements.push(<hr key={`hr-${i}`} className="my-3 border-border" />)
+        i++; continue
+      }
+
+      // Blockquote
+      if (line.startsWith('> ')) {
+        const quoteLines: string[] = []
+        while (i < lines.length && lines[i].startsWith('> ')) {
+          quoteLines.push(lines[i].slice(2))
+          i++
+        }
+        elements.push(
+          <blockquote key={`bq-${i}`} className="border-l-2 border-primary/50 pl-3 my-2 text-muted-foreground italic">
+            {quoteLines.map((ql, qi) => <p key={qi}>{applyInline(ql, qi)}</p>)}
+          </blockquote>
+        )
+        continue
+      }
+
+      // Unordered list
+      if (line.match(/^[-*•] /)) {
+        const items: string[] = []
+        while (i < lines.length && lines[i].match(/^[-*•] /)) {
+          items.push(lines[i].replace(/^[-*•] /, ''))
+          i++
+        }
+        elements.push(
+          <ul key={`ul-${i}`} className="list-disc list-inside my-1 space-y-0.5 pl-2">
+            {items.map((item, idx) => <li key={idx} className="text-sm">{applyInline(item, idx)}</li>)}
+          </ul>
+        )
+        continue
+      }
+
+      // Ordered list
+      if (line.match(/^\d+\. /)) {
+        const items: string[] = []
+        while (i < lines.length && lines[i].match(/^\d+\. /)) {
+          items.push(lines[i].replace(/^\d+\. /, ''))
+          i++
+        }
+        elements.push(
+          <ol key={`ol-${i}`} className="list-decimal list-inside my-1 space-y-0.5 pl-2">
+            {items.map((item, idx) => <li key={idx} className="text-sm">{applyInline(item, idx)}</li>)}
+          </ol>
+        )
+        continue
+      }
+
+      // Empty line
+      if (line.trim() === '') {
+        elements.push(<div key={`br-${i}`} className="h-1" />)
+        i++; continue
+      }
+
+      // Regular paragraph
+      elements.push(
+        <p key={`p-${i}`} className="text-sm leading-relaxed">{applyInline(line, `pi-${i}`)}</p>
       )
-    })
+      i++
+    }
+
+    return elements
   }
 
   return (
@@ -522,7 +621,38 @@ const AIChat: React.FC = () => {
     }
   }
 
-  const suggestedPrompts = SUGGESTED_PROMPTS.slice(0, 4)
+  // ── Dynamic suggested prompts from real tasks ──────────────────────────────
+  const { data: urgentTasks } = useQuery({
+    queryKey: ['ai-chat-urgent-tasks', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return []
+      const { data } = await supabase
+        .from('tasks')
+        .select('title, priority, due_at')
+        .eq('workspace_id', workspaceId)
+        .in('status', ['todo', 'doing'])
+        .order('priority', { ascending: false })
+        .order('due_at', { ascending: true, nullsFirst: false })
+        .limit(3)
+      return data ?? []
+    },
+    enabled: !!workspaceId,
+  })
+
+  const suggestedPrompts = React.useMemo(() => {
+    if (urgentTasks && urgentTasks.length > 0) {
+      const dynamic = urgentTasks.map(t =>
+        `Me ajuda a concluir a tarefa: "${t.title}"`
+      )
+      if (urgentTasks.length >= 2) {
+        dynamic.push(`Como priorizar: "${urgentTasks[0].title}" vs "${urgentTasks[1].title}"?`)
+      } else {
+        dynamic.push('Faça um resumo das minhas notas mais recentes')
+      }
+      return dynamic.slice(0, 4)
+    }
+    return FALLBACK_PROMPTS
+  }, [urgentTasks])
 
   return (
     <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-border bg-card">

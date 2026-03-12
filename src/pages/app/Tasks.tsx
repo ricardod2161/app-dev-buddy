@@ -6,16 +6,19 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import type { Task } from '@/types/database'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Pencil, Trash2, LayoutGrid, List, CheckSquare } from 'lucide-react'
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'
+import { Plus, Pencil, Trash2, LayoutGrid, List, CheckSquare, Loader2 } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragOverEvent,
   closestCenter, PointerSensor, useSensor, useSensors
@@ -25,6 +28,17 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { EmptyState } from '@/components/EmptyState'
 import { cn } from '@/lib/utils'
+
+// ── Zod schema ────────────────────────────────────────────────────────────────
+const taskSchema = z.object({
+  title: z.string().min(1, 'Título é obrigatório'),
+  description: z.string().optional(),
+  status: z.enum(['todo', 'doing', 'done']),
+  priority: z.enum(['low', 'medium', 'high']),
+  due_at: z.string().optional(),
+  project: z.string().optional(),
+})
+type TaskForm = z.infer<typeof taskSchema>
 
 const priorityConfig: Record<Task['priority'], { label: string; class: string }> = {
   high: { label: '🔴 Alta', class: 'bg-destructive/10 text-destructive border-destructive/20' },
@@ -119,31 +133,42 @@ interface TaskModalProps {
 
 const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId }) => {
   const qc = useQueryClient()
-  const [title, setTitle] = useState(task?.title ?? '')
-  const [description, setDescription] = useState(task?.description ?? '')
-  const [status, setStatus] = useState<Task['status']>(task?.status ?? 'todo')
-  const [priority, setPriority] = useState<Task['priority']>(task?.priority ?? 'medium')
-  const [dueAt, setDueAt] = useState(task?.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : '')
-  const [project, setProject] = useState(task?.project ?? '')
-  const [loading, setLoading] = useState(false)
+
+  const form = useForm<TaskForm>({
+    resolver: zodResolver(taskSchema),
+    defaultValues: {
+      title: '',
+      description: '',
+      status: 'todo',
+      priority: 'medium',
+      due_at: '',
+      project: '',
+    },
+  })
 
   React.useEffect(() => {
     if (open) {
-      setTitle(task?.title ?? ''); setDescription(task?.description ?? '')
-      setStatus(task?.status ?? 'todo'); setPriority(task?.priority ?? 'medium')
-      setDueAt(task?.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : '')
-      setProject(task?.project ?? '')
+      form.reset({
+        title: task?.title ?? '',
+        description: task?.description ?? '',
+        status: (task?.status ?? 'todo') as 'todo' | 'doing' | 'done',
+        priority: (task?.priority ?? 'medium') as 'low' | 'medium' | 'high',
+        due_at: task?.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : '',
+        project: task?.project ?? '',
+      })
     }
-  }, [open, task])
+  }, [open, task, form])
 
-  const save = async () => {
-    if (!title.trim()) { toast.error('Título é obrigatório'); return }
-    setLoading(true)
+  const onSubmit = async (values: TaskForm) => {
     try {
       const payload = {
-        title, description: description || null, status, priority,
-        due_at: dueAt || null, project: project || null,
-        completed_at: status === 'done' ? new Date().toISOString() : null,
+        title: values.title,
+        description: values.description || null,
+        status: values.status,
+        priority: values.priority,
+        due_at: values.due_at || null,
+        project: values.project || null,
+        completed_at: values.status === 'done' ? new Date().toISOString() : null,
       }
       if (task) {
         const { error } = await supabase.from('tasks').update(payload).eq('id', task.id)
@@ -158,8 +183,6 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
       onClose()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -167,52 +190,80 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{task ? 'Editar Tarefa' : 'Nova Tarefa'}</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <div>
-            <Label>Título *</Label>
-            <Input value={title} onChange={e => setTitle(e.target.value)} className="mt-1" placeholder="Título da tarefa" />
-          </div>
-          <div>
-            <Label>Descrição</Label>
-            <Textarea value={description} onChange={e => setDescription(e.target.value)} className="mt-1" rows={3} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Status</Label>
-              <Select value={status} onValueChange={v => setStatus(v as Task['status'])}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {statusColumns.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField control={form.control} name="title" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Título <span className="text-destructive">*</span></FormLabel>
+                <FormControl><Input {...field} placeholder="Título da tarefa" /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+
+            <FormField control={form.control} name="description" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Descrição</FormLabel>
+                <FormControl><Textarea {...field} rows={3} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+
+            <div className="grid grid-cols-2 gap-3">
+              <FormField control={form.control} name="status" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Status</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {statusColumns.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="priority" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Prioridade</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="low">🟢 Baixa</SelectItem>
+                      <SelectItem value="medium">🟡 Média</SelectItem>
+                      <SelectItem value="high">🔴 Alta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </div>
-            <div>
-              <Label>Prioridade</Label>
-              <Select value={priority} onValueChange={v => setPriority(v as Task['priority'])}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">🟢 Baixa</SelectItem>
-                  <SelectItem value="medium">🟡 Média</SelectItem>
-                  <SelectItem value="high">🔴 Alta</SelectItem>
-                </SelectContent>
-              </Select>
+
+            <div className="grid grid-cols-2 gap-3">
+              <FormField control={form.control} name="due_at" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Prazo</FormLabel>
+                  <FormControl><Input type="datetime-local" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="project" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Projeto</FormLabel>
+                  <FormControl><Input {...field} placeholder="Projeto..." /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Prazo</Label>
-              <Input type="datetime-local" value={dueAt} onChange={e => setDueAt(e.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <Label>Projeto</Label>
-              <Input value={project} onChange={e => setProject(e.target.value)} className="mt-1" placeholder="Projeto..." />
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} disabled={loading}>{loading ? 'Salvando...' : 'Salvar'}</Button>
-        </DialogFooter>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Salvando...</> : 'Salvar'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   )

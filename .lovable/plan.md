@@ -1,130 +1,120 @@
 
-## Deep audit of the full system
+## Diagnóstico: Delete já existe — problema é na experiência
 
-### What's already excellent (don't touch):
-- Auth flow, RLS policies, workspace model — production-ready
-- Tasks Kanban with dnd-kit — 3 columns, drag & drop working
-- Notes with TipTap inline editing — already solid
-- AI Chat ZYNTRA — streaming, Deep Think, context injection, persistence
-- Conversations with Realtime subscription — already done
-- Dashboard with charts, AI metrics card — complete
-- Command Palette Cmd+K — working
-- All 11 pages operational
+O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
 
-### Real gaps identified in the audit:
+### Problemas identificados
 
-**1. AIChat.tsx — markdown is hand-rolled and broken**
-The `renderContent()` function is a brittle regex parser. It doesn't handle nested markdown, code blocks with multiple lines, or proper `#/##` headings. AI responses with tables, code blocks (```js ... ```), or complex formatting look broken. Need to replace with proper markdown rendering using `react-markdown` + `remark-gfm` (already safe to add as new packages aren't needed — but since we don't have react-markdown, we can significantly improve the hand-rolled parser to properly handle fenced code blocks and heading levels).
+**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
+O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
 
-Actually — looking more carefully, `react-markdown` is not installed. We can greatly improve the custom renderer within AIChat.tsx to properly handle:
-- Multi-line fenced code blocks (```lang ... ```)  
-- Headings `# H1`, `## H2`, `### H3`
-- Horizontal rules `---`
-- Numbered lists `1. 2. 3.`
-- Blockquotes `>`
+**2. Match parcial pode falhar em casos reais**
+A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
 
-**2. AIChat.tsx — suggested prompts are always static**
-They never change based on actual tasks. The `SUGGESTED_PROMPTS` constant is hardcoded. Should load the 3 most urgent pending tasks and build dynamic prompts from them.
+**3. Erro "não encontrei" não ajuda o usuário**
+Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
 
-**3. AIChat.tsx — missing title auto-update**
-Conversations are titled with the first 50 chars of user's first message. Good. But after a few back-and-forths, a smarter title (based on topic) would be better. Minor polish.
+**4. Sem confirmação antes de deletar**
+A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
 
-**4. Notes.tsx — Create modal still uses old state pattern (not RHF+Zod)**
-The "create new note" dialog uses raw useState. Should use RHF + Zod like Contacts.tsx.
-
-**5. Tasks.tsx — TaskModal uses raw useState (not RHF+Zod)**
-The modal doesn't use react-hook-form + zod. Missing validation feedback and inconsistent with Contacts.tsx pattern.
-
-**6. Reminders.tsx — form uses raw useState (not RHF+Zod)**
-No validation library. Inconsistent with the development standards in project memory.
-
-**7. Reports.tsx — export only as .txt**
-Reports can be exported as plain text. Should export as Markdown too (the content is already in text/markdown format from generate-report edge function).
-
-**8. Conversations.tsx — no message count badge**
-The conversation list doesn't show an unread/message count badge. Minor polish.
-
-**9. Dashboard.tsx — no "IA em uso" quick link**
-There's an AI metrics card but no quick action button to go to the AI Chat.
-
-**10. Settings.tsx — no save confirmation / unsaved changes warning**
-If user edits and navigates away, changes are lost with no warning.
-
-**11. AIChat.tsx — no `react-markdown`; manual markdown broken for code blocks**
-The biggest actual UX bug. A multi-line code block like:
-```
-```python
-def foo():
-    return 1
-```
-```
-...renders as several disconnected `<div>` elements because lines are processed individually. The code block state is never tracked across lines.
-
-**12. Missing: keyboard shortcut `N` for New Note, `T` for New Task**
-The Command Palette exists but lacks quick-create shortcuts.
-
-**13. Dashboard.tsx — 9 queries on mount**
-All 9 queries fire independently. Should be batched where possible. Minor performance issue.
-
-**14. process-message edge function — no module-level integration cache**
-Every message triggers a fresh DB query for integration data. Cache miss ~100-200ms per message. Already in project memory as a known improvement.
+**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
 
 ---
 
-## Plan: what to actually build
+### O que será feito
 
-### Priority 1 — Fix the biggest UX bug: AIChat markdown rendering
-Rewrite `renderContent()` in AIChat.tsx to be a proper multi-pass parser:
-- Track `inCodeBlock` state across lines with language detection
-- Render fenced code blocks as `<pre><code>` with language badge
-- Ordered lists (tracking consecutive `1.`, `2.` lines)
-- Blockquotes `>`
-- Proper H1/H2/H3 with correct sizing
-- Horizontal rules
+**Arquivo:** `supabase/functions/process-message/index.ts`
 
-### Priority 2 — Dynamic suggested prompts from real tasks
-In the empty chat state, load top 3 `todo/doing` tasks with `due_at` set and build contextual prompts:
-- "Preciso de ajuda para concluir: [task title]"
-- "Me explica como priorizar: [task1], [task2], [task3]"
-etc.
+**A — Adicionar seção explícita no system prompt para deleção**
+Antes das "Regras de Ouro", adicionar:
 
-### Priority 3 — Tasks modal → RHF + Zod
-Replace the raw useState TaskModal with `react-hook-form` + `zod` validation. Consistent with project standards. 
+```
+## Exclusão de Itens — OBRIGATÓRIO
+Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
+- Tarefa → use delete_task com o título completo ou parte do título
+- Nota → use delete_note com o título
+- Lembrete → use cancel_reminder
 
-### Priority 4 — Reminders form → RHF + Zod
-Replace raw useState in create reminder dialog with proper form validation. Required by project memory constraints.
+Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
+"não preciso mais de", "cancela", "remove", "zera", "descarta"
 
-### Priority 5 — Reports: add Markdown export option
-Add a "Exportar .md" button alongside the existing .txt export. 3-line change.
+ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
+para o usuário escolher — não retorne erro vazio.
+```
 
-### Priority 6 — Dashboard: add quick-action link on AI card
-Add a small "Abrir Chat IA →" button/link on the "IA Hoje" card. Very fast, high value.
+**B — Melhorar o handler `delete_task` quando não encontra**
+Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
 
-### Priority 7 — process-message: integration module cache
-Add a module-level `Map<string, {data: Integration, ts: number}>` cache with 5-minute TTL. Saves ~100-200ms per WhatsApp/Telegram message by skipping a DB round-trip.
+```typescript
+// Quando não encontra: lista as tarefas disponíveis
+const { data: allTasks } = await supabase
+  .from('tasks')
+  .select('title, status')
+  .eq('workspace_id', workspace_id)
+  .in('status', ['todo', 'doing'])
+  .order('created_at', { ascending: false })
+  .limit(8)
 
-### Priority 8 — Conversations: message count in conversation list
-Add `messages_count` to the conversation list by using a `.select('id, count', { count: 'exact' })` or just show the last message preview text instead of just the phone number.
+if (allTasks?.length) {
+  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
+  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
+} else {
+  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
+}
+```
+
+**C — Mesma melhoria para `delete_note`**
+Quando não encontrar a nota, listar as notas recentes:
+
+```typescript
+const { data: allNotes } = await supabase
+  .from('notes')
+  .select('title, category')
+  .eq('workspace_id', workspace_id)
+  .order('created_at', { ascending: false })
+  .limit(8)
+
+if (allNotes?.length) {
+  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
+  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
+} else {
+  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
+}
+```
+
+**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
+Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
+
+**E — Melhorar o match com busca por palavras individuais**
+Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
+
+```typescript
+// Fallback: tenta match por primeira palavra significativa
+if (!matchingTasks?.length) {
+  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
+  if (words.length > 0) {
+    const { data: fallbackTasks } = await supabase
+      .from('tasks')
+      .select('id, title')
+      .eq('workspace_id', workspace_id)
+      .ilike('title', `%${words[0]}%`)
+      .limit(1)
+    // use fallbackTasks if found
+  }
+}
+```
 
 ---
 
-## Files to change
+### Resumo dos arquivos
 
 ```
-MOD  src/pages/app/AIChat.tsx         — fix markdown renderer + dynamic prompts
-MOD  src/pages/app/Tasks.tsx          — RHF+Zod in TaskModal
-MOD  src/pages/app/Reminders.tsx      — RHF+Zod in create dialog
-MOD  src/pages/app/Reports.tsx        — add .md export option  
-MOD  src/pages/app/Dashboard.tsx      — add quick link on AI card
-MOD  src/pages/app/Conversations.tsx  — show last message text in conversation list
-MOD  supabase/functions/process-message/index.ts — integration cache
+MOD  supabase/functions/process-message/index.ts
+  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
+  B — handler delete_task: quando não encontra, lista tarefas disponíveis
+  C — handler delete_note: quando não encontra, lista notas recentes  
+  D — system prompt: instrução "excluir lembrete = cancel_reminder"
+  E — handlers delete_task + delete_note: fallback de busca por palavra individual
 ```
 
-Total: 7 files modified, all safe, high-impact improvements. No new tables, no new edge functions.
-
-### What I will NOT do:
-- Add react-markdown package — not needed if we fix the parser properly
-- Migrate to feature folders — pure risk, zero visible benefit
-- Touch AuthContext — intentional timeout for race condition
-- Touch supabase client — auto-generated
-- Add new DB tables — not needed for these improvements
+Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
