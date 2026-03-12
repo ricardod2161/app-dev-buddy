@@ -11,7 +11,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { FileText, CheckSquare, Bell, MessageSquare, Clock, TrendingDown, Bot } from 'lucide-react'
+import { FileText, CheckSquare, Bell, MessageSquare, Clock, TrendingDown, Bot, Sparkles, ArrowRight } from 'lucide-react'
 import { format, subDays, startOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { stripHtml, truncate } from '@/lib/utils'
