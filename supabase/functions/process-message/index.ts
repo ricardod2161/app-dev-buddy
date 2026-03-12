@@ -1527,22 +1527,35 @@ async function sendReply({
   replyText: string
 }) {
   try {
-    const { data: integration } = await supabase
-      .from('integrations')
-      .select('*')
-      .eq('workspace_id', workspace_id)
-      .eq('provider', provider)
-      .eq('is_active', true)
-      .maybeSingle()
+    const cacheKey = `${workspace_id}:${provider}`
+    let integration = getCachedIntegration(cacheKey)
 
     if (!integration) {
-      const { data: fallback } = await supabase
+      const { data } = await supabase
         .from('integrations')
         .select('*')
         .eq('workspace_id', workspace_id)
+        .eq('provider', provider)
         .eq('is_active', true)
-        .in('provider', ['EVOLUTION', 'CLOUD', 'TELEGRAM'])
         .maybeSingle()
+      integration = data as Record<string, unknown> | null
+      if (integration) setCachedIntegration(cacheKey, integration)
+    }
+
+    if (!integration) {
+      const fallbackKey = `${workspace_id}:fallback`
+      let fallback = getCachedIntegration(fallbackKey)
+      if (!fallback) {
+        const { data } = await supabase
+          .from('integrations')
+          .select('*')
+          .eq('workspace_id', workspace_id)
+          .eq('is_active', true)
+          .in('provider', ['EVOLUTION', 'CLOUD', 'TELEGRAM'])
+          .maybeSingle()
+        fallback = data as Record<string, unknown> | null
+        if (fallback) setCachedIntegration(fallbackKey, fallback)
+      }
 
       if (!fallback) {
         console.error('No active integration to send reply')
