@@ -178,20 +178,25 @@ const ReportsPage: React.FC = () => {
           ) : (
             <div className="space-y-2">
               {(reports?.data ?? []).map(r => (
-                <div key={r.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                  <div>
-                    <Badge variant="outline">{typeLabels[r.type]}</Badge>
-                    <span className="ml-2 text-sm text-foreground">
-                      {format(new Date(r.period_start), 'dd/MM/yyyy', { locale: ptBR })} até {format(new Date(r.period_end), 'dd/MM/yyyy', { locale: ptBR })}
-                    </span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {format(new Date(r.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                    </span>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => exportTxt(r)}>
-                    <Download className="w-4 h-4" />
-                  </Button>
-                </div>
+                  <div key={r.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                   <div>
+                     <Badge variant="outline">{typeLabels[r.type]}</Badge>
+                     <span className="ml-2 text-sm text-foreground">
+                       {format(new Date(r.period_start), 'dd/MM/yyyy', { locale: ptBR })} até {format(new Date(r.period_end), 'dd/MM/yyyy', { locale: ptBR })}
+                     </span>
+                     <span className="ml-2 text-xs text-muted-foreground">
+                       {format(new Date(r.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                     </span>
+                   </div>
+                   <div className="flex gap-1">
+                     <Button variant="ghost" size="sm" onClick={() => exportTxt(r)} title="Exportar .txt">
+                       <Download className="w-4 h-4" />
+                     </Button>
+                     <Button variant="ghost" size="sm" onClick={() => exportMd(r)} title="Exportar .md" className="text-primary">
+                       <span className="text-xs font-mono font-bold">.md</span>
+                     </Button>
+                   </div>
+                 </div>
               ))}
               <div className="flex items-center justify-between pt-2">
                 <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>Anterior</Button>

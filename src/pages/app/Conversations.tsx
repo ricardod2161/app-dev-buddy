@@ -193,7 +193,18 @@ const ConversationsPage: React.FC = () => {
                         )}
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <p className="text-xs text-muted-foreground truncate flex-1">{conv.contact_phone}</p>
+                        <p className="text-xs text-muted-foreground truncate flex-1">
+                          {lastMessages?.[conv.id]
+                            ? (
+                              <>
+                                {lastMessages[conv.id].direction === 'OUT' && <span className="text-primary">↩ </span>}
+                                {lastMessages[conv.id].text.length > 35
+                                  ? lastMessages[conv.id].text.slice(0, 35) + '…'
+                                  : lastMessages[conv.id].text}
+                              </>
+                            )
+                            : conv.contact_phone}
+                        </p>
                         <Badge variant="outline" className="text-xs shrink-0 scale-90">{conv.provider}</Badge>
                       </div>
                     </div>
