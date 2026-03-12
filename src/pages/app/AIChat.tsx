@@ -520,7 +520,38 @@ const AIChat: React.FC = () => {
     }
   }
 
-  const suggestedPrompts = SUGGESTED_PROMPTS.slice(0, 4)
+  // ── Dynamic suggested prompts from real tasks ──────────────────────────────
+  const { data: urgentTasks } = useQuery({
+    queryKey: ['ai-chat-urgent-tasks', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return []
+      const { data } = await supabase
+        .from('tasks')
+        .select('title, priority, due_at')
+        .eq('workspace_id', workspaceId)
+        .in('status', ['todo', 'doing'])
+        .order('priority', { ascending: false })
+        .order('due_at', { ascending: true, nullsFirst: false })
+        .limit(3)
+      return data ?? []
+    },
+    enabled: !!workspaceId,
+  })
+
+  const suggestedPrompts = React.useMemo(() => {
+    if (urgentTasks && urgentTasks.length > 0) {
+      const dynamic = urgentTasks.map(t =>
+        `Me ajuda a concluir a tarefa: "${t.title}"`
+      )
+      if (urgentTasks.length >= 2) {
+        dynamic.push(`Como priorizar: "${urgentTasks[0].title}" vs "${urgentTasks[1].title}"?`)
+      } else {
+        dynamic.push('Faça um resumo das minhas notas mais recentes')
+      }
+      return dynamic.slice(0, 4)
+    }
+    return FALLBACK_PROMPTS
+  }, [urgentTasks])
 
   return (
     <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-border bg-card">
