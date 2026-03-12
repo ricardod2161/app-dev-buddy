@@ -57,6 +57,31 @@ const ConversationsPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  // Load last message per conversation for preview
+  const { data: lastMessages } = useQuery({
+    queryKey: ['last-messages', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return {}
+      const { data } = await supabase
+        .from('messages')
+        .select('conversation_id, body_text, type, direction, created_at')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      const map: Record<string, { text: string; direction: string }> = {}
+      for (const m of data ?? []) {
+        if (!map[m.conversation_id]) {
+          map[m.conversation_id] = {
+            text: m.body_text ?? `[${m.type}]`,
+            direction: m.direction,
+          }
+        }
+      }
+      return map
+    },
+    enabled: !!workspaceId,
+  })
+
   const { data: messages, isLoading: loadingMsgs } = useQuery({
     queryKey: ['messages', workspaceId, selectedId],
     queryFn: async () => {

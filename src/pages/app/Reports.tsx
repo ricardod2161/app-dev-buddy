@@ -101,6 +101,17 @@ const ReportsPage: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
+  const exportMd = (report: Report) => {
+    const mdContent = `# Relatório ${typeLabels[report.type]}\n**Período:** ${format(new Date(report.period_start), 'dd/MM/yyyy', { locale: ptBR })} — ${format(new Date(report.period_end), 'dd/MM/yyyy', { locale: ptBR })}\n**Gerado em:** ${format(new Date(report.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}\n\n---\n\n${report.content}`
+    const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `relatorio-${report.type}-${report.period_start}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-6">
       {/* Formulário */}
