@@ -6,16 +6,19 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import type { Task } from '@/types/database'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Pencil, Trash2, LayoutGrid, List, CheckSquare } from 'lucide-react'
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'
+import { Plus, Pencil, Trash2, LayoutGrid, List, CheckSquare, Loader2 } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragOverEvent,
   closestCenter, PointerSensor, useSensor, useSensors
@@ -25,6 +28,17 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { EmptyState } from '@/components/EmptyState'
 import { cn } from '@/lib/utils'
+
+// ── Zod schema ────────────────────────────────────────────────────────────────
+const taskSchema = z.object({
+  title: z.string().min(1, 'Título é obrigatório'),
+  description: z.string().optional(),
+  status: z.enum(['todo', 'doing', 'done']),
+  priority: z.enum(['low', 'medium', 'high']),
+  due_at: z.string().optional(),
+  project: z.string().optional(),
+})
+type TaskForm = z.infer<typeof taskSchema>
 
 const priorityConfig: Record<Task['priority'], { label: string; class: string }> = {
   high: { label: '🔴 Alta', class: 'bg-destructive/10 text-destructive border-destructive/20' },
