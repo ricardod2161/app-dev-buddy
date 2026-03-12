@@ -67,13 +67,11 @@ const MODELS = [
   { id: 'openai/gpt-5-mini', label: 'GPT-5 Mini', badge: 'OpenAI' },
 ]
 
-const SUGGESTED_PROMPTS = [
+const FALLBACK_PROMPTS = [
   'Quais são minhas tarefas mais urgentes hoje?',
   'Faça um resumo das minhas notas mais recentes',
   'Me ajuda a planejar minha semana com base nas minhas tarefas abertas',
   'Analisa minha produtividade e dá sugestões de melhoria',
-  'Crie um plano de ação para minhas tarefas em atraso',
-  'Que tipo de projeto você acha que estou trabalhando com base nas minhas notas?',
 ]
 
 // ─── Streaming helper ─────────────────────────────────────────────────────────
