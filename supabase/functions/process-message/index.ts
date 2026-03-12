@@ -5,6 +5,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// ── Module-level integration cache (5-minute TTL) ─────────────────────────────
+const integrationCache = new Map<string, { data: Record<string, unknown>; ts: number }>()
+const CACHE_TTL_MS = 5 * 60 * 1000
+
+function getCachedIntegration(key: string): Record<string, unknown> | null {
+  const entry = integrationCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.ts > CACHE_TTL_MS) { integrationCache.delete(key); return null }
+  return entry.data
+}
+
+function setCachedIntegration(key: string, data: Record<string, unknown>): void {
+  integrationCache.set(key, { data, ts: Date.now() })
+}
+
 interface ProcessMessageBody {
   workspace_id: string
   conversation_id: string
