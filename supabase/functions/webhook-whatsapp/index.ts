@@ -421,7 +421,7 @@ Deno.serve(async (req) => {
         workspace_id: workspaceId,
         conversation_id: conversationId,
         message_text: messageText,
-        sender_phone: phoneE164,
+        sender_phone: canonicalPhone,
         provider,
         message_type: messageType,
         media_url: mediaUrl,
