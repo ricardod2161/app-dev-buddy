@@ -153,7 +153,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
       form.reset({
         title: task?.title ?? '',
         description: task?.description ?? '',
-        status: (task?.status ?? 'todo') as 'todo' | 'doing' | 'done',
+        status: (task?.status ?? 'todo') as 'todo' | 'doing' | 'done' | 'canceled',
         priority: (task?.priority ?? 'medium') as 'low' | 'medium' | 'high',
         due_at: task?.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : '',
         project: task?.project ?? '',
