@@ -167,6 +167,22 @@ Deno.serve(async (req) => {
     }
 
     // ── 1. Fetch workspace settings + contact name ───────────────────────────
+    // Normaliza variantes do telefone (8 vs 9 dígitos BR)
+    const senderVariants = (() => {
+      const withPlus = sender_phone.startsWith('+') ? sender_phone : `+${sender_phone}`
+      const stripped = withPlus.slice(1)
+      const variants = new Set<string>([withPlus])
+      if (/^55\d{2}\d{8}$/.test(stripped)) {
+        const ddd = stripped.slice(2, 4)
+        variants.add(`+55${ddd}9${stripped.slice(4)}`)
+      }
+      if (/^55\d{2}9\d{8}$/.test(stripped)) {
+        const ddd = stripped.slice(2, 4)
+        variants.add(`+55${ddd}${stripped.slice(5)}`)
+      }
+      return [...variants]
+    })()
+
     const [{ data: settings }, { data: contactRow }] = await Promise.all([
       supabase
         .from('workspace_settings')
@@ -177,7 +193,7 @@ Deno.serve(async (req) => {
         .from('contacts')
         .select('name, notes')
         .eq('workspace_id', workspace_id)
-        .eq('phone_e164', sender_phone)
+        .in('phone_e164', senderVariants)
         .maybeSingle(),
     ])
 
