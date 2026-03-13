@@ -483,6 +483,7 @@ const TaskFromNoteModal: React.FC<TaskFromNoteModalProps> = ({ note, open, onClo
 const NotesPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterProject, setFilterProject] = useState('all')
@@ -503,6 +504,11 @@ const NotesPage: React.FC = () => {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
+
+  // Auto-open when ?new=1 (from CommandPalette)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') setNewNoteOpen(true)
+  }, [searchParams])
 
   const { data: settings } = useQuery({
     queryKey: ['workspace-settings', workspaceId],

@@ -56,6 +56,7 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'outlin
 const RemindersPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [open, setOpen] = useState(false)
   const [naturalDate, setNaturalDate] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
