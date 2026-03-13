@@ -408,7 +408,7 @@ const TasksPage: React.FC = () => {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {statusColumns.map(col => (
               <DroppableColumn
                 key={col.key}
@@ -423,7 +423,7 @@ const TasksPage: React.FC = () => {
                   strategy={verticalListSortingStrategy}
                 >
                   {tasksByStatus(col.key).length === 0 && !activeTask && (
-                    <p className="text-xs text-muted-foreground text-center py-4">Nenhuma tarefa</p>
+                    <p className={cn('text-xs text-center py-4', col.dimmed ? 'text-muted-foreground/50' : 'text-muted-foreground')}>Nenhuma tarefa</p>
                   )}
                   {tasksByStatus(col.key).map(task => (
                     <SortableTaskCard
