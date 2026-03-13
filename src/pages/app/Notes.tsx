@@ -140,7 +140,6 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
         .update({ title, content, category: catValue, project, tags })
         .eq('id', note.id)
       if (error) throw error
-      toast.success('Nota salva')
       qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
@@ -154,6 +153,7 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
   }
 
   const cancel = () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     setTitle(note.title ?? '')
     setContent(note.content ?? '')
     setCategory(note.category ?? 'none')
@@ -161,6 +161,7 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
     setTags((note.tags as string[]) ?? [])
     setTagInput('')
     setDirty(false)
+    setAutoSaveStatus('idle')
     setExpanded(false)
   }
 
