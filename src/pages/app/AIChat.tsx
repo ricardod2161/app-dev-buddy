@@ -507,6 +507,10 @@ const AIChat: React.FC = () => {
   const [deepThink, setDeepThink] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [contextLoaded, setContextLoaded] = useState<{ notes: number; tasks: number } | null>(null)
+  const [proactiveMode, setProactiveMode] = useState(() => {
+    try { return localStorage.getItem('zyntra_proactive_mode') !== 'false' } catch { return true }
+  })
+  const [convSearch, setConvSearch] = useState('')
 
   // Voice state
   const [isListening, setIsListening] = useState(false)
@@ -516,6 +520,7 @@ const AIChat: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const proactiveTriggeredRef = useRef(false)
 
   // Scroll to bottom
   useEffect(() => {
