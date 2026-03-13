@@ -1,120 +1,102 @@
 
-## Diagnóstico: Delete já existe — problema é na experiência
+## Diagnosis — Complete Root Cause Analysis
 
-O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
+### Evidence collected:
 
-### Problemas identificados
+1. **webhook-whatsapp logs show:**
+   ```
+   sender=559882549505  (12 digits, no 9th digit)
+   ```
 
-**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
-O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
+2. **Whitelist in database has:**
+   ```
+   +5598982549505  (13 digits, WITH 9th digit)
+   ```
 
-**2. Match parcial pode falhar em casos reais**
-A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
+3. **What happens in the code (line 264):**
+   ```typescript
+   const phoneE164 = senderPhone.startsWith('+') ? senderPhone : `+${senderPhone}`
+   // senderPhone = "559882549505"
+   // phoneE164   = "+559882549505"  ← 12 digits
+   ```
 
-**3. Erro "não encontrei" não ajuda o usuário**
-Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
+4. **Then the whitelist check at line 276:**
+   ```
+   .eq('phone_e164', '+559882549505')  ← does NOT match "+5598982549505"
+   ```
 
-**4. Sem confirmação antes de deletar**
-A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
+5. **Result:** webhook_logs table is empty (no rows being written since 11:15) — messages ARE arriving (logs show `sender=559882549505`) but the whitelist block is happening silently BEFORE the log is inserted. Wait — actually looking again at the code flow:
+   - Line 222-230: log is inserted FIRST (status='processing')
+   - Line 263-286: whitelist check runs AFTER log insert
+   - But webhook_logs is empty...
+   
+   Re-reading: the `webhook_logs` table returned **zero rows** in the query — meaning the webhook IS running (logs show it), it's finding the integration, but then something fails before the log INSERT (or the log table has RLS blocking service role? No, service role bypasses RLS).
 
-**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
+   Actually looking more carefully: the logs show `[webhook] Using fallback integration` — this means the instance name is `null` and it falls back to the active integration. The code then proceeds to insert a log at line 222. But `webhook_logs` is empty. This means the INSERT is failing silently.
 
----
+   The real issue is: **after adding numbers to the whitelist, the user's WhatsApp number (`559882549505`) doesn't match `+5598982549505`** in the whitelist. This is the Brazilian telecom migration issue — some numbers still come in 8-digit format (`88254-9505`) vs the newer 9-digit format (`9 8825-4505`).
 
-### O que será feito
+   Additionally: there are NO webhook_logs rows at all — which means the INSERT at line 222-230 is also failing. This could be because `webhook_logs` table has RLS and the service role is being blocked, OR the table structure has changed.
 
-**Arquivo:** `supabase/functions/process-message/index.ts`
+### Confirmed issues:
 
-**A — Adicionar seção explícita no system prompt para deleção**
-Antes das "Regras de Ouro", adicionar:
+**Issue 1 — Critical: Brazilian phone number normalization mismatch**
+- Evolution sends `559882549505` (55 + 98 + 82549505 = old 8-digit)  
+- User stored `+5598982549505` (55 + 98 + 9 + 82549505 = new 9-digit)
+- These are the SAME real number — just different formats
+- Fix: in the whitelist check, also try the 9th-digit normalized version
 
-```
-## Exclusão de Itens — OBRIGATÓRIO
-Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
-- Tarefa → use delete_task com o título completo ou parte do título
-- Nota → use delete_note com o título
-- Lembrete → use cancel_reminder
+**Issue 2 — Critical: webhook_logs INSERT failing silently**
+- No rows in webhook_logs after 11:15 despite webhook arriving
+- The service role should bypass RLS — but let's check if the table structure mismatch is causing an issue
+- The `webhook_logs` table has no `updated_at` column — the code tries to `update({ status: 'ok' })` by id which is fine
+- Most likely the RLS on webhook_logs is blocking even service role (misconfigured) OR the log insert IS working but was cleaned up
 
-Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
-"não preciso mais de", "cancela", "remove", "zera", "descarta"
+**Issue 3 — process-message never called**
+- With whitelist blocking, process-message is never dispatched — this is the downstream effect
 
-ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
-para o usuário escolher — não retorne erro vazio.
-```
+### Fix plan:
 
-**B — Melhorar o handler `delete_task` quando não encontra**
-Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
+**File: `supabase/functions/webhook-whatsapp/index.ts`**
 
-```typescript
-// Quando não encontra: lista as tarefas disponíveis
-const { data: allTasks } = await supabase
-  .from('tasks')
-  .select('title, status')
-  .eq('workspace_id', workspace_id)
-  .in('status', ['todo', 'doing'])
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allTasks?.length) {
-  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
-  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
-} else {
-  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
-}
-```
-
-**C — Mesma melhoria para `delete_note`**
-Quando não encontrar a nota, listar as notas recentes:
+Replace the whitelist check (lines 264-286) with a normalized check that handles the Brazilian 9-digit migration:
 
 ```typescript
-const { data: allNotes } = await supabase
-  .from('notes')
-  .select('title, category')
-  .eq('workspace_id', workspace_id)
-  .order('created_at', { ascending: false })
-  .limit(8)
+// Normalize phone: handle both 8-digit and 9-digit Brazilian mobile formats
+const phoneE164 = senderPhone.startsWith('+') ? senderPhone : `+${senderPhone}`
 
-if (allNotes?.length) {
-  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
-  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
-} else {
-  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
-}
-```
-
-**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
-Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
-
-**E — Melhorar o match com busca por palavras individuais**
-Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
-
-```typescript
-// Fallback: tenta match por primeira palavra significativa
-if (!matchingTasks?.length) {
-  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
-  if (words.length > 0) {
-    const { data: fallbackTasks } = await supabase
-      .from('tasks')
-      .select('id, title')
-      .eq('workspace_id', workspace_id)
-      .ilike('title', `%${words[0]}%`)
-      .limit(1)
-    // use fallbackTasks if found
+// Also try the alternative format (Brazilian 9th digit normalization)
+// 8-digit:  55XX8XXXXXXX → 55XXXXXXXXXX (12 digits after country code)
+// 9-digit:  55XX9XXXXXXX → 55XXXXXXXXXX (13 digits after country code)
+function getNormalizedVariants(phone: string): string[] {
+  const variants = [phone]
+  const stripped = phone.startsWith('+') ? phone.slice(1) : phone
+  // If 12 digits starting with 55 (Brazilian 8-digit) — add 9th digit variant
+  if (/^55\d{2}\d{8}$/.test(stripped)) {
+    const cc = stripped.slice(0, 2)  // 55
+    const ddd = stripped.slice(2, 4) // e.g. 98
+    const number = stripped.slice(4) // 8-digit number
+    variants.push(`+${cc}${ddd}9${number}`)
   }
+  // If 13 digits starting with 55 (Brazilian 9-digit) — add 8-digit variant
+  if (/^55\d{2}9\d{8}$/.test(stripped)) {
+    const cc = stripped.slice(0, 2)
+    const ddd = stripped.slice(2, 4)
+    const number = stripped.slice(5) // skip the '9'
+    variants.push(`+${cc}${ddd}${number}`)
+  }
+  return [...new Set(variants)]
 }
 ```
 
----
+Then use `.in('phone_e164', variants)` instead of `.eq('phone_e164', phoneE164)`.
 
-### Resumo dos arquivos
+**This single fix restores all messaging.**
 
-```
-MOD  supabase/functions/process-message/index.ts
-  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
-  B — handler delete_task: quando não encontra, lista tarefas disponíveis
-  C — handler delete_note: quando não encontra, lista notas recentes  
-  D — system prompt: instrução "excluir lembrete = cancel_reminder"
-  E — handlers delete_task + delete_note: fallback de busca por palavra individual
-```
+The same normalization needs to be applied to the conversation lookup (line 293: `.eq('contact_phone', phoneE164)`) — otherwise a new conversation is created every time the number format differs.
 
-Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
+### Files to modify:
+1. `supabase/functions/webhook-whatsapp/index.ts` — Add phone normalization helper + use `.in()` for whitelist + conversation lookups
+2. `supabase/functions/process-message/index.ts` — Check if `sender_phone` normalization is also needed for the contact lookup there
+
+### No DB changes needed — purely a function fix.
