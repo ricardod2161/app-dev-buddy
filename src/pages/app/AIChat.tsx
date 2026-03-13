@@ -523,8 +523,9 @@ const AIChat: React.FC = () => {
 
   // ── Voice input setup ──────────────────────────────────────────────────────
   const toggleListening = useCallback(() => {
-    const SpeechRecognitionAPI = (window as typeof window & { webkitSpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition
-      || (window as typeof window & { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any
+    const SpeechRecognitionAPI = w.SpeechRecognition || w.webkitSpeechRecognition
 
     if (!SpeechRecognitionAPI) {
       toast.error('Seu navegador não suporta reconhecimento de voz. Use Chrome ou Edge.')
@@ -537,16 +538,18 @@ const AIChat: React.FC = () => {
       return
     }
 
-    const recognition = new SpeechRecognitionAPI()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recognition = new SpeechRecognitionAPI() as any
     recognition.lang = 'pt-BR'
     recognition.continuous = false
     recognition.interimResults = false
 
     recognition.onstart = () => setIsListening(true)
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript
-      setInput(prev => (prev ? prev + ' ' + transcript : transcript))
+      setInput((prev: string) => (prev ? prev + ' ' + transcript : transcript))
       setIsListening(false)
     }
 
