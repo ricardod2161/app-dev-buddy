@@ -73,6 +73,12 @@ const RemindersPage: React.FC = () => {
     },
   })
 
+  // Auto-open when ?new=1 (from CommandPalette)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') handleOpen()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const { data: reminders, isLoading } = useQuery({
     queryKey: ['reminders', workspaceId, filterStatus],
     queryFn: async () => {
