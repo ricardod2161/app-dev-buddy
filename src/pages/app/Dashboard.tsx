@@ -344,6 +344,9 @@ const DashboardPage: React.FC = () => {
         </Card>
       </div>
 
+      {/* ZYNTRA Proactive Suggestions */}
+      <ZyntraSuggestionsCard workspaceId={workspaceId ?? ''} onOpenChat={(prompt) => navigate('/app/ai-chat', { state: { prompt } })} />
+
       {/* Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Recent Notes */}
