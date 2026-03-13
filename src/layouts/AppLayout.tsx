@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { AppSidebar } from '@/components/AppSidebar'
 import { TopBar } from '@/components/TopBar'
 import CommandPalette from '@/components/CommandPalette'
+import { useReminderAlarm } from '@/hooks/useReminderAlarm'
 
 interface SidebarContextType {
   mobileOpen: boolean
@@ -23,6 +24,9 @@ const AppLayout: React.FC = () => {
   const { session, loading } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
+
+  // Alarme de despertador — monitora lembretes agendados e dispara som + notificação
+  useReminderAlarm()
 
   if (loading) {
     return (
