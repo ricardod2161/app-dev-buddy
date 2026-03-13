@@ -278,6 +278,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
 const TasksPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [view, setView] = useState<'kanban' | 'list'>('kanban')
   const [modalOpen, setModalOpen] = useState(false)
   const [editTask, setEditTask] = useState<Task | null>(null)
@@ -299,6 +300,14 @@ const TasksPage: React.FC = () => {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
+
+  // Auto-open modal when ?new=1 in URL (from CommandPalette)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setEditTask(null)
+      setModalOpen(true)
+    }
+  }, [searchParams])
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
