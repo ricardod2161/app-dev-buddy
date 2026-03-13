@@ -24,7 +24,7 @@ import {
 import {
   Sparkles, Plus, Trash2, Copy, Check, RotateCcw, Download,
   Send, BrainCircuit, Info, ChevronRight, X, Loader2, MessageSquare,
-  Mic, MicOff, Volume2, VolumeX, CheckSquare, FileText, Bell,
+  Mic, MicOff, Volume2, VolumeX, CheckSquare, FileText, Bell, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
