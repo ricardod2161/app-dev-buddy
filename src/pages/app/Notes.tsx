@@ -295,12 +295,13 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
                   <ArrowRight className="w-3 h-3 mr-1" /> Transformar em Tarefa
                 </Button>
               </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancel}>Cancelar</Button>
-                <Button size="sm" className="h-7 text-xs gap-1" onClick={save} disabled={saving || !dirty}>
-                  <Check className="w-3 h-3" />
-                  {saving ? 'Salvando...' : 'Salvar'}
-                </Button>
+              <div className="flex items-center gap-2">
+                {/* Auto-save indicator */}
+                {autoSaveStatus === 'pending' && <span className="text-xs text-muted-foreground">●</span>}
+                {autoSaveStatus === 'saving' && <span className="text-xs text-muted-foreground animate-pulse">Salvando…</span>}
+                {autoSaveStatus === 'saved' && <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1"><Check className="w-3 h-3" />Salvo</span>}
+                {autoSaveStatus === 'error' && <span className="text-xs text-destructive">Erro ao salvar</span>}
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancel}>Fechar</Button>
               </div>
             </div>
           </div>
