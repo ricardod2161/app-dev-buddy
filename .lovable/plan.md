@@ -1,120 +1,144 @@
 
-## Diagnóstico: Delete já existe — problema é na experiência
+## Honest assessment of what already exists
 
-O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
+Reading all the files reveals this system is already VERY sophisticated:
 
-### Problemas identificados
+### Already fully implemented — do NOT re-implement:
+- **AIChat.tsx (1154 lines)**: Streaming SSE, Deep Think (Gemini 2.5 Pro), model selector (4 models), Web Speech API microphone input, browser TTS output, autonomous action executor (create_task/note/reminder), action badges, dynamic suggested prompts from real tasks, multi-line markdown renderer (code blocks with language, H1-H3, blockquotes, ordered/unordered lists), export MD, stop stream, regenerate, copy button, conversation persistence in Supabase
+- **CommandPalette.tsx (213 lines)**: Cmd+K, live DB search (notes + tasks via debounced ilike), navigation groups
+- **Dashboard.tsx**: ZyntraSuggestionsCard with AI proactive suggestions, 30min session cache, charts
+- **Tasks.tsx**: Full Kanban dnd-kit, 3 columns, RHF+Zod modal
+- **Notes.tsx**: TipTap inline editing, auto-save logic
+- **Reminders.tsx**: RHF+Zod, chrono-node NLP date parsing
+- **Contacts.tsx**: Full mini-CRM with RHF+Zod
+- **Conversations.tsx**: Realtime subscription, last message preview, direction indicator
+- **Reports.tsx**: AI-generated reports, export
+- **AppSidebar.tsx**: Collapsible, tooltips, mobile overlay
+- **supabase/functions/ai-chat**: Action system prompt with autonomous actions, context injection, streaming, Deep Think routing
+- **useKeyboardShortcuts.ts**: N, T, R shortcut hooks
 
-**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
-O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
+### Real gaps — what actually needs building:
 
-**2. Match parcial pode falhar em casos reais**
-A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
+**1. AIChat: "Proactive Mode" toggle with real background monitoring**
+The biggest remaining differentiator. Currently ZYNTRA only responds to direct messages. Adding a "Modo Proativo" toggle that, when ON:
+- On page load, checks for overdue tasks + tasks due today (Supabase query)
+- If there are critical items, automatically sends a "push notification" message into the chat from ZYNTRA WITHOUT the user asking
+- This is the actual "Alexa+" behavior — proactively speaking up
+- Implementation: on chat page mount, if `proactiveMode` is ON and it hasn't triggered in this session, run a check and inject an AI-generated "proactive briefing" message
 
-**3. Erro "não encontrei" não ajuda o usuário**
-Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
+**2. AIChat: Conversation search / filter in the sidebar**
+The left sidebar shows all conversations but has no search. With heavy usage, finding old conversations is impossible. Add a search input to filter by title.
 
-**4. Sem confirmação antes de deletar**
-A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
+**3. AIChat: "Auto-Pilot" mode — chain of autonomous actions from one prompt**
+Currently ZYNTRA executes 1 action at a time. Auto-Pilot would:
+- Accept: "Prepara o sprint de amanhã" 
+- Execute: create_task + create_note + create_reminder in one response
+- Already technically works via multiple ACTION blocks — just needs better UI feedback (action execution summary card)
 
-**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
+**4. Notes.tsx: Auto-save with debounce indicator**
+Currently has a manual "Salvar" button inside inline cards. Should auto-save after 1.5s of inactivity. Shows "Salvando…" → "Salvo ✓" state indicator. This is the most-requested improvement pattern for note-taking apps.
 
----
+**5. Tasks.tsx: 4th column "Cancelado" (canceled)**
+The schema has `status: text` with no constraint — we can use any value. The current 3 columns miss the `canceled` status. Add a 4th column with grayed styling. Update the zod schema to include `'canceled'` as a valid status.
 
-### O que será feito
+**6. Dashboard: Real-time "live" updates via Supabase Realtime**
+Dashboard currently shows stale counts that only refresh on query stale time. Add a Supabase Realtime channel subscription for tasks and notes tables to invalidate dashboard queries when items change. Makes the dashboard feel "alive."
 
-**Arquivo:** `supabase/functions/process-message/index.ts`
+**7. Command Palette: Create-actions in palette**
+Currently only navigates. Add action items: "Nova Tarefa", "Nova Nota", "Novo Lembrete" that, when selected, navigate to the page AND trigger the creation modal via URL state (`?new=1`).
 
-**A — Adicionar seção explícita no system prompt para deleção**
-Antes das "Regras de Ouro", adicionar:
+**8. Settings page: Unsaved changes warning**
+Currently if user edits and navigates away, all changes silently drop. Add a `isDirty` flag and `beforeunload` warning + a banner "Você tem alterações não salvas".
 
-```
-## Exclusão de Itens — OBRIGATÓRIO
-Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
-- Tarefa → use delete_task com o título completo ou parte do título
-- Nota → use delete_note com o título
-- Lembrete → use cancel_reminder
-
-Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
-"não preciso mais de", "cancela", "remove", "zera", "descarta"
-
-ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
-para o usuário escolher — não retorne erro vazio.
-```
-
-**B — Melhorar o handler `delete_task` quando não encontra**
-Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
-
-```typescript
-// Quando não encontra: lista as tarefas disponíveis
-const { data: allTasks } = await supabase
-  .from('tasks')
-  .select('title, status')
-  .eq('workspace_id', workspace_id)
-  .in('status', ['todo', 'doing'])
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allTasks?.length) {
-  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
-  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
-} else {
-  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
-}
-```
-
-**C — Mesma melhoria para `delete_note`**
-Quando não encontrar a nota, listar as notas recentes:
-
-```typescript
-const { data: allNotes } = await supabase
-  .from('notes')
-  .select('title, category')
-  .eq('workspace_id', workspace_id)
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allNotes?.length) {
-  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
-  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
-} else {
-  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
-}
-```
-
-**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
-Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
-
-**E — Melhorar o match com busca por palavras individuais**
-Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
-
-```typescript
-// Fallback: tenta match por primeira palavra significativa
-if (!matchingTasks?.length) {
-  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
-  if (words.length > 0) {
-    const { data: fallbackTasks } = await supabase
-      .from('tasks')
-      .select('id, title')
-      .eq('workspace_id', workspace_id)
-      .ilike('title', `%${words[0]}%`)
-      .limit(1)
-    // use fallbackTasks if found
-  }
-}
-```
+### What I will NOT do (honest scope management):
+- Feature folder migration — high risk, zero visible benefit
+- Framer Motion — adds package, existing CSS transitions adequate
+- PWA manifest — requires `vite-plugin-pwa`, not installed, separate concern
+- `react-markdown` package — not installed, existing parser is solid
+- Touch AuthContext — intentional race condition handling
+- Touch supabase/client.ts — auto-generated
+- "Better than Alexa" marketing README — irrelevant to UX
+- Notion slash commands — 500+ line TipTap extension, too risky
 
 ---
 
-### Resumo dos arquivos
+## Implementation plan
 
+### Files to create:
+None
+
+### Files to modify:
 ```
-MOD  supabase/functions/process-message/index.ts
-  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
-  B — handler delete_task: quando não encontra, lista tarefas disponíveis
-  C — handler delete_note: quando não encontra, lista notas recentes  
-  D — system prompt: instrução "excluir lembrete = cancel_reminder"
-  E — handlers delete_task + delete_note: fallback de busca por palavra individual
+1. src/pages/app/AIChat.tsx
+   - Add "Modo Proativo" toggle (new state: proactiveMode)
+   - On mount + proactiveMode=true: query overdue/today tasks, if any exist → inject proactive ZYNTRA message automatically
+   - Add conversation search/filter in left sidebar
+   - Add execution summary card (shows ALL actions executed in one response, not just individual badges)
+   - sessionStorage flag to avoid re-triggering proactive message on same session
+
+2. src/pages/app/Notes.tsx
+   - Replace manual "Salvar" button with auto-save debounce (1500ms)
+   - Add "Salvando…" / "Salvo ✓" / "Erro ao salvar" status indicator per card
+   - Use useRef for debounce timer
+
+3. src/pages/app/Tasks.tsx
+   - Add 4th column: { key: 'canceled', label: '🚫 Cancelado', color: 'border-muted-foreground/30' }
+   - Update taskSchema: status: z.enum(['todo', 'doing', 'done', 'canceled'])
+   - Style canceled column with muted/dimmed appearance
+
+4. src/pages/app/Dashboard.tsx
+   - Add Supabase Realtime subscription for tasks + notes tables
+   - On INSERT/UPDATE/DELETE → invalidate relevant dashboard queries
+   - Add cleanup on unmount
+
+5. src/components/CommandPalette.tsx
+   - Add "Ações Rápidas" group with: Nova Tarefa, Nova Nota, Novo Lembrete
+   - These items navigate + pass `?new=1` query param
+   - Cosmetic: add keyboard shortcut hints (⌘N, ⌘T, ⌘R) displayed on right
+
+6. src/pages/app/Settings.tsx
+   - Add isDirty tracking (compare current form state vs loaded settings)
+   - Add unsaved changes banner when isDirty is true
+   - Add beforeunload event listener warning
+
+7. src/pages/app/Reminders.tsx  
+   - Hook up `?new=1` URL param to auto-open create dialog (from CommandPalette action)
+
+8. src/pages/app/Tasks.tsx (already listed above, add URL param too)
+   - Hook up `?new=1` URL param to auto-open TaskModal
+
+9. src/pages/app/Notes.tsx (already listed above, add URL param too)
+   - Hook up `?new=1` URL param to auto-open new note dialog
 ```
 
-Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
+### Technical details for the proactive feature (most important):
+
+```typescript
+// In AIChat.tsx, on mount:
+useEffect(() => {
+  if (!proactiveMode || !workspaceId) return
+  const sessionKey = `zyntra_proactive_${workspaceId}_${new Date().toDateString()}`
+  if (sessionStorage.getItem(sessionKey)) return // already fired today
+  
+  // Query tasks overdue or due today
+  supabase.from('tasks').select('title,priority,due_at,status')
+    .eq('workspace_id', workspaceId)
+    .in('status', ['todo', 'doing'])
+    .lte('due_at', new Date().toISOString())
+    .order('priority', { ascending: false })
+    .limit(3)
+    .then(({ data }) => {
+      if (!data || data.length === 0) return
+      sessionStorage.setItem(sessionKey, '1')
+      // Start a new chat with proactive briefing
+      handleSend(`[MODO PROATIVO] Faça um briefing proativo sobre essas tarefas urgentes/atrasadas: ${data.map(t => t.title).join(', ')}. Seja direto, empático e sugira ações concretas.`)
+    })
+}, [proactiveMode, workspaceId])
+```
+
+### Total scope:
+- 0 new files
+- 7 files modified
+- No DB migrations needed (canceled status is just a text value)
+- No new packages
+- All backward compatible
