@@ -25,6 +25,9 @@ const AppLayout: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
 
+  // Alarme de despertador — monitora lembretes agendados e dispara som + notificação
+  useReminderAlarm()
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
