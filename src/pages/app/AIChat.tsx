@@ -898,6 +898,49 @@ const AIChat: React.FC = () => {
     return FALLBACK_PROMPTS
   }, [urgentTasks])
 
+  // ── Proactive Mode — auto-briefing on mount when overdue/today tasks exist
+  useEffect(() => {
+    if (!proactiveMode || !workspaceId || proactiveTriggeredRef.current) return
+    const sessionKey = `zyntra_proactive_${workspaceId}_${new Date().toDateString()}`
+    if (sessionStorage.getItem(sessionKey)) return
+
+    const timer = setTimeout(async () => {
+      const endOfDay = new Date()
+      endOfDay.setHours(23, 59, 59, 999)
+      const { data } = await supabase
+        .from('tasks')
+        .select('title, priority, due_at, status')
+        .eq('workspace_id', workspaceId)
+        .in('status', ['todo', 'doing'])
+        .lte('due_at', endOfDay.toISOString())
+        .order('priority', { ascending: false })
+        .limit(4)
+
+      if (!data || data.length === 0) return
+      proactiveTriggeredRef.current = true
+      sessionStorage.setItem(sessionKey, '1')
+
+      const now = new Date().toISOString()
+      const overdue = data.filter(t => t.due_at && new Date(t.due_at) < new Date(now))
+      const dueToday = data.filter(t => t.due_at && new Date(t.due_at) >= new Date(now))
+      const parts: string[] = []
+      if (overdue.length > 0) parts.push(`ATRASADAS: ${overdue.map(t => `"${t.title}"`).join(', ')}`)
+      if (dueToday.length > 0) parts.push(`VENCEM HOJE: ${dueToday.map(t => `"${t.title}"`).join(', ')}`)
+
+      const briefingPrompt = `[MODO PROATIVO — BRIEFING AUTOMÁTICO]\n\nFaça um briefing proativo, empático e direto sobre as seguintes tarefas urgentes do usuário:\n${parts.join('\n')}\n\nSeja específico, priorize as mais críticas e sugira uma ação concreta para cada uma. Finalize perguntando se quer ajuda para executar alguma delas.`
+      handleSend(briefingPrompt)
+    }, 1500)
+
+    return () => clearTimeout(timer)
+  }, [proactiveMode, workspaceId, handleSend])
+
+  // ── Filter conversations by search ────────────────────────────────────────
+  const filteredConversations = React.useMemo(() => {
+    if (!convSearch.trim()) return conversations ?? []
+    const q = convSearch.toLowerCase()
+    return (conversations ?? []).filter(c => c.title.toLowerCase().includes(q))
+  }, [conversations, convSearch])
+
   return (
     <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-border bg-card">
       {/* ── Left: Conversation List ── */}
