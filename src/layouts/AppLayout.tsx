@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { AppSidebar } from '@/components/AppSidebar'
 import { TopBar } from '@/components/TopBar'
 import CommandPalette from '@/components/CommandPalette'
+import { useReminderAlarm } from '@/hooks/useReminderAlarm'
 
 interface SidebarContextType {
   mobileOpen: boolean
