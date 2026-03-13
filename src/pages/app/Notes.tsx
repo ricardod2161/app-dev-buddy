@@ -449,6 +449,20 @@ const NotesPage: React.FC = () => {
   const [deleteNote, setDeleteNote] = useState<Note | null>(null)
   const [taskNote, setTaskNote] = useState<Note | null>(null)
 
+  // Keyboard shortcut: N → new note
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const el = document.activeElement
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)) return
+        e.preventDefault()
+        setNewNoteOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   const { data: settings } = useQuery({
     queryKey: ['workspace-settings', workspaceId],
     queryFn: async () => {
