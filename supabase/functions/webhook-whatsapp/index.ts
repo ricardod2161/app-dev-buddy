@@ -453,3 +453,30 @@ function hexToBytes(hex: string): Uint8Array {
   }
   return bytes
 }
+
+/**
+ * Normaliza números brasileiros para cobrir o formato antigo (8 dígitos)
+ * e o novo (9 dígitos). O Evolution às vezes envia sem o nono dígito,
+ * enquanto o banco armazena com. Retorna ambas as variantes.
+ */
+function getNormalizedVariants(phone: string): string[] {
+  const withPlus = phone.startsWith('+') ? phone : `+${phone}`
+  const stripped = withPlus.slice(1) // sem o '+'
+  const variants = new Set<string>([withPlus])
+
+  // Número brasileiro sem o 9º dígito: 55 + DDD(2) + 8 dígitos = 12 dígitos totais
+  if (/^55\d{2}\d{8}$/.test(stripped)) {
+    const ddd = stripped.slice(2, 4)
+    const num = stripped.slice(4)
+    variants.add(`+55${ddd}9${num}`) // adiciona variante com 9
+  }
+
+  // Número brasileiro com o 9º dígito: 55 + DDD(2) + 9 + 8 dígitos = 13 dígitos totais
+  if (/^55\d{2}9\d{8}$/.test(stripped)) {
+    const ddd = stripped.slice(2, 4)
+    const num = stripped.slice(5) // pula o '9'
+    variants.add(`+55${ddd}${num}`) // adiciona variante sem 9
+  }
+
+  return [...variants]
+}
