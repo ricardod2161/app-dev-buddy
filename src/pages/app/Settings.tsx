@@ -127,6 +127,7 @@ const SettingsPage: React.FC = () => {
       if (error) throw error
       toast.success('Configurações salvas')
       qc.invalidateQueries({ queryKey: ['workspace-settings', workspaceId] })
+      setIsDirty(false)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
     } finally {
