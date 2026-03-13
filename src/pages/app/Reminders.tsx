@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
@@ -56,6 +57,7 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'outlin
 const RemindersPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [open, setOpen] = useState(false)
   const [naturalDate, setNaturalDate] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
@@ -70,6 +72,12 @@ const RemindersPage: React.FC = () => {
       remind_at: '',
     },
   })
+
+  // Auto-open when ?new=1 (from CommandPalette)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') handleOpen()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { data: reminders, isLoading } = useQuery({
     queryKey: ['reminders', workspaceId, filterStatus],

@@ -12,7 +12,7 @@ import {
 import {
   LayoutDashboard, FileText, CheckSquare, Bell, MessageSquare,
   Users, BarChart3, MessageCircle, List, Settings, ScrollText,
-  Sparkles, Search,
+  Sparkles, Search, Plus,
 } from 'lucide-react'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
@@ -36,6 +36,12 @@ const NAV_ITEMS = [
   { label: 'Whitelist', path: '/app/whitelist', icon: List, group: 'Sistema' },
   { label: 'Configurações', path: '/app/settings', icon: Settings, group: 'Sistema' },
   { label: 'Logs de Webhook', path: '/app/logs', icon: ScrollText, group: 'Sistema' },
+]
+
+const QUICK_ACTIONS = [
+  { label: 'Nova Tarefa', path: '/app/tasks?new=1', icon: CheckSquare, hint: 'T' },
+  { label: 'Nova Nota', path: '/app/notes?new=1', icon: FileText, hint: 'N' },
+  { label: 'Novo Lembrete', path: '/app/reminders?new=1', icon: Bell, hint: 'R' },
 ]
 
 const GROUPS = ['Navegação', 'IA & Comunicação', 'Sistema']
@@ -122,6 +128,23 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onOpenChange }) =
         <CommandEmpty>
           {isSearching ? 'Nenhum resultado encontrado.' : 'Digite para buscar…'}
         </CommandEmpty>
+
+        {/* Quick Actions group — always visible */}
+        <CommandGroup heading="Ações Rápidas">
+          {QUICK_ACTIONS.map(action => (
+            <CommandItem
+              key={action.path}
+              value={`quick-${action.label}`}
+              onSelect={() => handleSelect(action.path)}
+              className="cursor-pointer"
+            >
+              <Plus className="mr-2 h-4 w-4 text-primary" />
+              <span className="flex-1">{action.label}</span>
+              <kbd className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">{action.hint}</kbd>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+        <CommandSeparator />
 
         {/* Live DB Results */}
         {isSearching && hasSearchResults && (

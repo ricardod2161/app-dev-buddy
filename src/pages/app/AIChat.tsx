@@ -24,7 +24,7 @@ import {
 import {
   Sparkles, Plus, Trash2, Copy, Check, RotateCcw, Download,
   Send, BrainCircuit, Info, ChevronRight, X, Loader2, MessageSquare,
-  Mic, MicOff, Volume2, VolumeX, CheckSquare, FileText, Bell,
+  Mic, MicOff, Volume2, VolumeX, CheckSquare, FileText, Bell, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -507,6 +507,10 @@ const AIChat: React.FC = () => {
   const [deepThink, setDeepThink] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [contextLoaded, setContextLoaded] = useState<{ notes: number; tasks: number } | null>(null)
+  const [proactiveMode, setProactiveMode] = useState(() => {
+    try { return localStorage.getItem('zyntra_proactive_mode') !== 'false' } catch { return true }
+  })
+  const [convSearch, setConvSearch] = useState('')
 
   // Voice state
   const [isListening, setIsListening] = useState(false)
@@ -516,6 +520,7 @@ const AIChat: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const proactiveTriggeredRef = useRef(false)
 
   // Scroll to bottom
   useEffect(() => {
@@ -564,6 +569,11 @@ const AIChat: React.FC = () => {
     recognitionRef.current = recognition
     recognition.start()
   }, [isListening])
+
+  // Persist proactive mode preference
+  useEffect(() => {
+    try { localStorage.setItem('zyntra_proactive_mode', String(proactiveMode)) } catch { /* ignore */ }
+  }, [proactiveMode])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -888,6 +898,49 @@ const AIChat: React.FC = () => {
     return FALLBACK_PROMPTS
   }, [urgentTasks])
 
+  // ── Proactive Mode — auto-briefing on mount when overdue/today tasks exist
+  useEffect(() => {
+    if (!proactiveMode || !workspaceId || proactiveTriggeredRef.current) return
+    const sessionKey = `zyntra_proactive_${workspaceId}_${new Date().toDateString()}`
+    if (sessionStorage.getItem(sessionKey)) return
+
+    const timer = setTimeout(async () => {
+      const endOfDay = new Date()
+      endOfDay.setHours(23, 59, 59, 999)
+      const { data } = await supabase
+        .from('tasks')
+        .select('title, priority, due_at, status')
+        .eq('workspace_id', workspaceId)
+        .in('status', ['todo', 'doing'])
+        .lte('due_at', endOfDay.toISOString())
+        .order('priority', { ascending: false })
+        .limit(4)
+
+      if (!data || data.length === 0) return
+      proactiveTriggeredRef.current = true
+      sessionStorage.setItem(sessionKey, '1')
+
+      const now = new Date().toISOString()
+      const overdue = data.filter(t => t.due_at && new Date(t.due_at) < new Date(now))
+      const dueToday = data.filter(t => t.due_at && new Date(t.due_at) >= new Date(now))
+      const parts: string[] = []
+      if (overdue.length > 0) parts.push(`ATRASADAS: ${overdue.map(t => `"${t.title}"`).join(', ')}`)
+      if (dueToday.length > 0) parts.push(`VENCEM HOJE: ${dueToday.map(t => `"${t.title}"`).join(', ')}`)
+
+      const briefingPrompt = `[MODO PROATIVO — BRIEFING AUTOMÁTICO]\n\nFaça um briefing proativo, empático e direto sobre as seguintes tarefas urgentes do usuário:\n${parts.join('\n')}\n\nSeja específico, priorize as mais críticas e sugira uma ação concreta para cada uma. Finalize perguntando se quer ajuda para executar alguma delas.`
+      handleSend(briefingPrompt)
+    }, 1500)
+
+    return () => clearTimeout(timer)
+  }, [proactiveMode, workspaceId, handleSend])
+
+  // ── Filter conversations by search ────────────────────────────────────────
+  const filteredConversations = React.useMemo(() => {
+    if (!convSearch.trim()) return conversations ?? []
+    const q = convSearch.toLowerCase()
+    return (conversations ?? []).filter(c => c.title.toLowerCase().includes(q))
+  }, [conversations, convSearch])
+
   return (
     <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-border bg-card">
       {/* ── Left: Conversation List ── */}
@@ -904,16 +957,43 @@ const AIChat: React.FC = () => {
             <Plus className="w-4 h-4" />
           </Button>
         </div>
+
+        {/* Proactive mode toggle */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-primary/5">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-primary" />
+            <span className="text-xs font-medium text-primary">Modo Proativo</span>
+          </div>
+          <Switch
+            checked={proactiveMode}
+            onCheckedChange={setProactiveMode}
+            className="scale-75"
+          />
+        </div>
+
+        {/* Conversation search */}
+        <div className="px-2 pt-2 pb-1">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              value={convSearch}
+              onChange={e => setConvSearch(e.target.value)}
+              placeholder="Buscar conversas…"
+              className="w-full pl-7 pr-2 py-1 text-xs rounded-md bg-background border border-input focus:outline-none focus:ring-1 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
+        </div>
+
         <div className="flex-1 overflow-y-auto py-1">
           {loadingConvs
             ? [...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 mx-2 my-1 rounded-lg" />)
-            : (conversations ?? []).length === 0
+            : filteredConversations.length === 0
               ? (
                 <p className="text-xs text-muted-foreground text-center mt-6 px-3">
-                  Nenhuma conversa ainda. Comece digitando abaixo!
+                  {convSearch ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda. Comece digitando abaixo!'}
                 </p>
               )
-              : (conversations ?? []).map(conv => (
+              : filteredConversations.map(conv => (
                 <div
                   key={conv.id}
                   className={cn(

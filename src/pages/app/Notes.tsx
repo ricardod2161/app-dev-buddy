@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
@@ -82,8 +83,46 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
   const [tagInput, setTagInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>('idle')
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const markDirty = useCallback(() => setDirty(true), [])
+  const markDirty = useCallback(() => {
+    setDirty(true)
+    setAutoSaveStatus('pending')
+    // Debounce auto-save: 1.5s after last change
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null
+      // trigger save via a ref-based approach
+      setAutoSaveStatus('saving')
+    }, 1500)
+  }, [])
+
+  // Execute save when status transitions to 'saving'
+  useEffect(() => {
+    if (autoSaveStatus !== 'saving') return
+    const catValue = category === 'none' ? null : category
+    supabase
+      .from('notes')
+      .update({ title, content, category: catValue, project, tags })
+      .eq('id', note.id)
+      .then(({ error }) => {
+        if (error) {
+          setAutoSaveStatus('error')
+        } else {
+          setAutoSaveStatus('saved')
+          setDirty(false)
+          qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
+          qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
+          qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
+          setTimeout(() => setAutoSaveStatus('idle'), 2500)
+        }
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSaveStatus])
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }, [])
 
   const addTag = () => {
     const t = tagInput.trim()
@@ -101,7 +140,6 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
         .update({ title, content, category: catValue, project, tags })
         .eq('id', note.id)
       if (error) throw error
-      toast.success('Nota salva')
       qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
       qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
@@ -115,6 +153,7 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
   }
 
   const cancel = () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     setTitle(note.title ?? '')
     setContent(note.content ?? '')
     setCategory(note.category ?? 'none')
@@ -122,6 +161,7 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
     setTags((note.tags as string[]) ?? [])
     setTagInput('')
     setDirty(false)
+    setAutoSaveStatus('idle')
     setExpanded(false)
   }
 
@@ -255,12 +295,13 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
                   <ArrowRight className="w-3 h-3 mr-1" /> Transformar em Tarefa
                 </Button>
               </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancel}>Cancelar</Button>
-                <Button size="sm" className="h-7 text-xs gap-1" onClick={save} disabled={saving || !dirty}>
-                  <Check className="w-3 h-3" />
-                  {saving ? 'Salvando...' : 'Salvar'}
-                </Button>
+              <div className="flex items-center gap-2">
+                {/* Auto-save indicator */}
+                {autoSaveStatus === 'pending' && <span className="text-xs text-muted-foreground">●</span>}
+                {autoSaveStatus === 'saving' && <span className="text-xs text-muted-foreground animate-pulse">Salvando…</span>}
+                {autoSaveStatus === 'saved' && <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1"><Check className="w-3 h-3" />Salvo</span>}
+                {autoSaveStatus === 'error' && <span className="text-xs text-destructive">Erro ao salvar</span>}
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancel}>Fechar</Button>
               </div>
             </div>
           </div>
@@ -442,6 +483,7 @@ const TaskFromNoteModal: React.FC<TaskFromNoteModalProps> = ({ note, open, onClo
 const NotesPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterProject, setFilterProject] = useState('all')
@@ -462,6 +504,11 @@ const NotesPage: React.FC = () => {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
+
+  // Auto-open when ?new=1 (from CommandPalette)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') setNewNoteOpen(true)
+  }, [searchParams])
 
   const { data: settings } = useQuery({
     queryKey: ['workspace-settings', workspaceId],

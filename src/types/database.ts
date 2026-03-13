@@ -100,7 +100,7 @@ export interface Task {
   workspace_id: string
   title: string
   description: string | null
-  status: 'todo' | 'doing' | 'done'
+  status: 'todo' | 'doing' | 'done' | 'canceled'
   due_at: string | null
   priority: 'low' | 'medium' | 'high'
   tags: string[]

@@ -62,6 +62,18 @@ const SettingsPage: React.FC = () => {
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
   const [tzSearch, setTzSearch] = useState('')
+  const [isDirty, setIsDirty] = useState(false)
+
+  const markDirty = React.useCallback(() => setIsDirty(true), [])
+
+  // Warn on navigation away with unsaved changes
+  React.useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   React.useEffect(() => {
     if (settings) {
@@ -76,6 +88,7 @@ const SettingsPage: React.FC = () => {
       setTtsVoiceId(settings.tts_voice_id ?? 'nPczCjzI2devNBz1zQrb')
       setDailyBriefingEnabled(settings.daily_briefing_enabled ?? false)
       setDailyBriefingTime(settings.daily_briefing_time ?? '07:00')
+      setIsDirty(false)
     }
   }, [settings])
 
@@ -114,6 +127,7 @@ const SettingsPage: React.FC = () => {
       if (error) throw error
       toast.success('Configurações salvas')
       qc.invalidateQueries({ queryKey: ['workspace-settings', workspaceId] })
+      setIsDirty(false)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
     } finally {
@@ -139,6 +153,12 @@ const SettingsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-2xl animate-slide-up">
+      {/* Unsaved changes banner */}
+      {isDirty && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 border border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-700">
+          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">⚠️ Você tem alterações não salvas</span>
+        </div>
+      )}
       {/* Nome do assistente */}
       <Card>
         <CardHeader>

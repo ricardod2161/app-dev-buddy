@@ -1,12 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import type { Task } from '@/types/database'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,7 @@ import { cn } from '@/lib/utils'
 const taskSchema = z.object({
   title: z.string().min(1, 'Título é obrigatório'),
   description: z.string().optional(),
-  status: z.enum(['todo', 'doing', 'done']),
+  status: z.enum(['todo', 'doing', 'done', 'canceled']),
   priority: z.enum(['low', 'medium', 'high']),
   due_at: z.string().optional(),
   project: z.string().optional(),
@@ -46,10 +47,11 @@ const priorityConfig: Record<Task['priority'], { label: string; class: string }>
   low: { label: '🟢 Baixa', class: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400' },
 }
 
-const statusColumns: { key: Task['status']; label: string; color: string }[] = [
+const statusColumns: { key: Task['status']; label: string; color: string; dimmed?: boolean }[] = [
   { key: 'todo', label: '📋 A Fazer', color: 'border-border' },
   { key: 'doing', label: '🔄 Em Andamento', color: 'border-primary/50' },
   { key: 'done', label: '✅ Concluído', color: 'border-green-500/50' },
+  { key: 'canceled', label: '🚫 Cancelado', color: 'border-muted-foreground/30', dimmed: true },
 ]
 
 // --- Droppable Column ---
@@ -151,7 +153,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
       form.reset({
         title: task?.title ?? '',
         description: task?.description ?? '',
-        status: (task?.status ?? 'todo') as 'todo' | 'doing' | 'done',
+        status: (task?.status ?? 'todo') as 'todo' | 'doing' | 'done' | 'canceled',
         priority: (task?.priority ?? 'medium') as 'low' | 'medium' | 'high',
         due_at: task?.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : '',
         project: task?.project ?? '',
@@ -215,7 +217,10 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {statusColumns.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
+                      <SelectItem value="todo">📋 A Fazer</SelectItem>
+                      <SelectItem value="doing">🔄 Em Andamento</SelectItem>
+                      <SelectItem value="done">✅ Concluído</SelectItem>
+                      <SelectItem value="canceled">🚫 Cancelado</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -273,6 +278,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
 const TasksPage: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [view, setView] = useState<'kanban' | 'list'>('kanban')
   const [modalOpen, setModalOpen] = useState(false)
   const [editTask, setEditTask] = useState<Task | null>(null)
@@ -294,6 +300,14 @@ const TasksPage: React.FC = () => {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
+
+  // Auto-open modal when ?new=1 in URL (from CommandPalette)
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setEditTask(null)
+      setModalOpen(true)
+    }
+  }, [searchParams])
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
@@ -394,7 +408,7 @@ const TasksPage: React.FC = () => {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {statusColumns.map(col => (
               <DroppableColumn
                 key={col.key}
@@ -409,7 +423,7 @@ const TasksPage: React.FC = () => {
                   strategy={verticalListSortingStrategy}
                 >
                   {tasksByStatus(col.key).length === 0 && !activeTask && (
-                    <p className="text-xs text-muted-foreground text-center py-4">Nenhuma tarefa</p>
+                    <p className={cn('text-xs text-center py-4', col.dimmed ? 'text-muted-foreground/50' : 'text-muted-foreground')}>Nenhuma tarefa</p>
                   )}
                   {tasksByStatus(col.key).map(task => (
                     <SortableTaskCard
