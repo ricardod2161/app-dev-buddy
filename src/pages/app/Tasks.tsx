@@ -217,7 +217,10 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, open, onClose, workspaceId 
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {statusColumns.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
+                      <SelectItem value="todo">📋 A Fazer</SelectItem>
+                      <SelectItem value="doing">🔄 Em Andamento</SelectItem>
+                      <SelectItem value="done">✅ Concluído</SelectItem>
+                      <SelectItem value="canceled">🚫 Cancelado</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
