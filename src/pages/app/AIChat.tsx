@@ -570,6 +570,11 @@ const AIChat: React.FC = () => {
     recognition.start()
   }, [isListening])
 
+  // Persist proactive mode preference
+  useEffect(() => {
+    try { localStorage.setItem('zyntra_proactive_mode', String(proactiveMode)) } catch { /* ignore */ }
+  }, [proactiveMode])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
