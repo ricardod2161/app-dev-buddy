@@ -62,6 +62,18 @@ const SettingsPage: React.FC = () => {
   const [newTag, setNewTag] = useState('')
   const [saving, setSaving] = useState(false)
   const [tzSearch, setTzSearch] = useState('')
+  const [isDirty, setIsDirty] = useState(false)
+
+  const markDirty = React.useCallback(() => setIsDirty(true), [])
+
+  // Warn on navigation away with unsaved changes
+  React.useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   React.useEffect(() => {
     if (settings) {

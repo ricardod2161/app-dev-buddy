@@ -12,7 +12,7 @@ import {
 import {
   LayoutDashboard, FileText, CheckSquare, Bell, MessageSquare,
   Users, BarChart3, MessageCircle, List, Settings, ScrollText,
-  Sparkles, Search,
+  Sparkles, Search, Plus,
 } from 'lucide-react'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
@@ -36,6 +36,12 @@ const NAV_ITEMS = [
   { label: 'Whitelist', path: '/app/whitelist', icon: List, group: 'Sistema' },
   { label: 'Configurações', path: '/app/settings', icon: Settings, group: 'Sistema' },
   { label: 'Logs de Webhook', path: '/app/logs', icon: ScrollText, group: 'Sistema' },
+]
+
+const QUICK_ACTIONS = [
+  { label: 'Nova Tarefa', path: '/app/tasks?new=1', icon: CheckSquare, hint: 'T' },
+  { label: 'Nova Nota', path: '/app/notes?new=1', icon: FileText, hint: 'N' },
+  { label: 'Novo Lembrete', path: '/app/reminders?new=1', icon: Bell, hint: 'R' },
 ]
 
 const GROUPS = ['Navegação', 'IA & Comunicação', 'Sistema']
