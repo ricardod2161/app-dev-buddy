@@ -153,6 +153,12 @@ const SettingsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-2xl animate-slide-up">
+      {/* Unsaved changes banner */}
+      {isDirty && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 border border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-700">
+          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">⚠️ Você tem alterações não salvas</span>
+        </div>
+      )}
       {/* Nome do assistente */}
       <Card>
         <CardHeader>
