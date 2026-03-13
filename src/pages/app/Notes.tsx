@@ -83,8 +83,46 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, categories, workspaceId, onDe
   const [tagInput, setTagInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>('idle')
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const markDirty = useCallback(() => setDirty(true), [])
+  const markDirty = useCallback(() => {
+    setDirty(true)
+    setAutoSaveStatus('pending')
+    // Debounce auto-save: 1.5s after last change
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null
+      // trigger save via a ref-based approach
+      setAutoSaveStatus('saving')
+    }, 1500)
+  }, [])
+
+  // Execute save when status transitions to 'saving'
+  useEffect(() => {
+    if (autoSaveStatus !== 'saving') return
+    const catValue = category === 'none' ? null : category
+    supabase
+      .from('notes')
+      .update({ title, content, category: catValue, project, tags })
+      .eq('id', note.id)
+      .then(({ error }) => {
+        if (error) {
+          setAutoSaveStatus('error')
+        } else {
+          setAutoSaveStatus('saved')
+          setDirty(false)
+          qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
+          qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
+          qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
+          setTimeout(() => setAutoSaveStatus('idle'), 2500)
+        }
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSaveStatus])
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }, [])
 
   const addTag = () => {
     const t = tagInput.trim()
