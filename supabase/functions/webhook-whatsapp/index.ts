@@ -260,8 +260,14 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Whitelist check
+    // ── Phone normalization: cobre formato 8 dígitos (antigo) e 9 dígitos (novo) ──
     const phoneE164 = senderPhone.startsWith('+') ? senderPhone : `+${senderPhone}`
+    const phoneVariants = getNormalizedVariants(phoneE164)
+    // Usa a variante canônica (preferência pelo formato com 9º dígito para BR)
+    const canonicalPhone = phoneVariants.find(v => /^\+55\d{2}9\d{8}$/.test(v)) ?? phoneE164
+    console.log(`[webhook] phoneE164=${phoneE164} variants=${phoneVariants.join(',')} canonical=${canonicalPhone}`)
+
+    // Whitelist check
     const { count: whitelistCount } = await supabase
       .from('whitelist_numbers')
       .select('id', { count: 'exact' })
@@ -273,31 +279,32 @@ Deno.serve(async (req) => {
         .from('whitelist_numbers')
         .select('id')
         .eq('workspace_id', workspaceId)
-        .eq('phone_e164', phoneE164)
+        .in('phone_e164', phoneVariants)
         .eq('is_active', true)
         .maybeSingle()
 
       if (!whitelistMatch) {
-        await supabase.from('webhook_logs').update({ status: 'whitelist_blocked', error: `Phone ${phoneE164} not in whitelist` }).eq('id', logId!)
+        console.warn(`[webhook] Whitelist block: variants=${phoneVariants.join(',')} not found`)
+        await supabase.from('webhook_logs').update({ status: 'whitelist_blocked', error: `Phone ${canonicalPhone} not in whitelist` }).eq('id', logId!)
         return new Response(JSON.stringify({ ok: true, blocked: true }), {
           status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
     }
 
-    // Upsert conversation
+    // Upsert conversation — busca por qualquer variante do número
     const { data: existingConv } = await supabase
       .from('conversations')
-      .select('id')
+      .select('id, contact_phone')
       .eq('workspace_id', workspaceId)
-      .eq('contact_phone', phoneE164)
+      .in('contact_phone', phoneVariants)
       .maybeSingle()
 
     const { data: contactRow } = await supabase
       .from('contacts')
       .select('name')
       .eq('workspace_id', workspaceId)
-      .eq('phone_e164', phoneE164)
+      .in('phone_e164', phoneVariants)
       .maybeSingle()
     const contactName = contactRow?.name ?? null
 
@@ -310,7 +317,7 @@ Deno.serve(async (req) => {
     } else {
       const { data: newConv, error: convErr } = await supabase.from('conversations').insert({
         workspace_id: workspaceId,
-        contact_phone: phoneE164,
+        contact_phone: canonicalPhone,
         contact_name: contactName,
         provider,
         last_message_at: new Date().toISOString(),
@@ -321,7 +328,7 @@ Deno.serve(async (req) => {
           .from('conversations')
           .select('id')
           .eq('workspace_id', workspaceId)
-          .eq('contact_phone', phoneE164)
+          .in('contact_phone', phoneVariants)
           .maybeSingle()
         if (!retryConv) throw new Error(`Failed to create/find conversation: ${convErr?.message ?? 'unknown'}`)
         conversationId = retryConv.id
