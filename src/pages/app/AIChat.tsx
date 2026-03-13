@@ -24,6 +24,7 @@ import {
 import {
   Sparkles, Plus, Trash2, Copy, Check, RotateCcw, Download,
   Send, BrainCircuit, Info, ChevronRight, X, Loader2, MessageSquare,
+  Mic, MicOff, Volume2, VolumeX, CheckSquare, FileText, Bell,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -56,6 +57,12 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   isStreaming?: boolean
+  actions?: ParsedAction[]
+}
+
+interface ParsedAction {
+  type: 'create_task' | 'create_note' | 'create_reminder'
+  params: Record<string, string>
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -73,6 +80,31 @@ const FALLBACK_PROMPTS = [
   'Me ajuda a planejar minha semana com base nas minhas tarefas abertas',
   'Analisa minha produtividade e dá sugestões de melhoria',
 ]
+
+// ─── Action Parser ────────────────────────────────────────────────────────────
+
+/**
+ * Parses [ACTION:type|key=value|key=value] blocks from AI text.
+ * Returns { cleanText, actions }
+ */
+function parseActionsFromText(text: string): { cleanText: string; actions: ParsedAction[] } {
+  const actions: ParsedAction[] = []
+  const actionRegex = /\[ACTION:(create_task|create_note|create_reminder)\|([^\]]*)\]/gi
+
+  const cleanText = text.replace(actionRegex, (_, type, paramsStr) => {
+    const params: Record<string, string> = {}
+    paramsStr.split('|').forEach((pair: string) => {
+      const eqIdx = pair.indexOf('=')
+      if (eqIdx > -1) {
+        params[pair.slice(0, eqIdx).trim()] = pair.slice(eqIdx + 1).trim()
+      }
+    })
+    actions.push({ type: type as ParsedAction['type'], params })
+    return '' // strip from visible text
+  }).trim()
+
+  return { cleanText, actions }
+}
 
 // ─── Streaming helper ─────────────────────────────────────────────────────────
 
@@ -192,6 +224,79 @@ const CopyButton: React.FC<{ text: string }> = ({ text }) => {
   )
 }
 
+// ─── TTS Button ──────────────────────────────────────────────────────────────
+
+const TTSButton: React.FC<{ text: string }> = ({ text }) => {
+  const [speaking, setSpeaking] = useState(false)
+
+  const toggle = () => {
+    if (!('speechSynthesis' in window)) {
+      toast.error('Seu navegador não suporta síntese de voz')
+      return
+    }
+    if (speaking) {
+      window.speechSynthesis.cancel()
+      setSpeaking(false)
+      return
+    }
+    // Strip markdown for cleaner speech
+    const plainText = text
+      .replace(/```[\s\S]*?```/g, ' trecho de código ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*(.+?)\*/g, '$1')
+      .replace(/^#{1,3} /gm, '')
+      .replace(/^[-*•] /gm, '')
+      .replace(/\[ACTION:[^\]]*\]/g, '')
+      .trim()
+
+    const utter = new SpeechSynthesisUtterance(plainText)
+    utter.lang = 'pt-BR'
+    utter.rate = 1.05
+    utter.onend = () => setSpeaking(false)
+    utter.onerror = () => setSpeaking(false)
+    window.speechSynthesis.speak(utter)
+    setSpeaking(true)
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      className={cn(
+        'p-1 rounded transition-colors',
+        speaking
+          ? 'text-primary bg-primary/10'
+          : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+      )}
+      title={speaking ? 'Parar leitura' : 'Ouvir resposta'}
+    >
+      {speaking ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+    </button>
+  )
+}
+
+// ─── Action Badge ─────────────────────────────────────────────────────────────
+
+const ActionBadge: React.FC<{ action: ParsedAction }> = ({ action }) => {
+  const icons = {
+    create_task: <CheckSquare className="w-3 h-3" />,
+    create_note: <FileText className="w-3 h-3" />,
+    create_reminder: <Bell className="w-3 h-3" />,
+  }
+  const labels = {
+    create_task: `Tarefa: ${action.params.title ?? '—'}`,
+    create_note: `Nota: ${action.params.title ?? '—'}`,
+    create_reminder: `Lembrete: ${action.params.message ?? '—'}`,
+  }
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-xs text-primary w-fit mt-1">
+      {icons[action.type]}
+      <span>{labels[action.type]}</span>
+      <Badge variant="secondary" className="text-[9px] py-0 px-1">Executado ✓</Badge>
+    </div>
+  )
+}
+
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
 const MessageBubble: React.FC<{
@@ -201,14 +306,12 @@ const MessageBubble: React.FC<{
 }> = ({ msg, onRegenerate, isLast }) => {
   const isUser = msg.role === 'user'
 
-  // Proper multi-pass markdown renderer
   const renderContent = (content: string) => {
     const lines = content.split('\n')
     const elements: React.ReactNode[] = []
     let i = 0
 
     const applyInline = (text: string, key: string | number): React.ReactNode => {
-      // Handle inline code, bold, italic with dangerouslySetInnerHTML
       const html = text
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
@@ -353,11 +456,22 @@ const MessageBubble: React.FC<{
             <span className="inline-block w-0.5 h-4 bg-current animate-pulse ml-0.5 align-middle" />
           )}
         </div>
+
+        {/* Action badges — shown after streaming completes */}
+        {!msg.isStreaming && msg.actions && msg.actions.length > 0 && (
+          <div className="flex flex-col gap-1 px-1">
+            {msg.actions.map((a, idx) => <ActionBadge key={idx} action={a} />)}
+          </div>
+        )}
+
         <div className={cn(
           'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity',
           isUser ? 'flex-row-reverse' : 'flex-row'
         )}>
           <CopyButton text={msg.content} />
+          {!isUser && !msg.isStreaming && (
+            <TTSButton text={msg.content} />
+          )}
           {!isUser && isLast && onRegenerate && (
             <button
               onClick={onRegenerate}
@@ -394,6 +508,11 @@ const AIChat: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [contextLoaded, setContextLoaded] = useState<{ notes: number; tasks: number } | null>(null)
 
+  // Voice state
+  const [isListening, setIsListening] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -402,6 +521,57 @@ const AIChat: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
+
+  // ── Voice input setup ──────────────────────────────────────────────────────
+  const toggleListening = useCallback(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any
+    const SpeechRecognitionAPI = w.SpeechRecognition || w.webkitSpeechRecognition
+
+    if (!SpeechRecognitionAPI) {
+      toast.error('Seu navegador não suporta reconhecimento de voz. Use Chrome ou Edge.')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recognition = new SpeechRecognitionAPI() as any
+    recognition.lang = 'pt-BR'
+    recognition.continuous = false
+    recognition.interimResults = false
+
+    recognition.onstart = () => setIsListening(true)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript
+      setInput((prev: string) => (prev ? prev + ' ' + transcript : transcript))
+      setIsListening(false)
+    }
+
+    recognition.onerror = () => {
+      setIsListening(false)
+      toast.error('Erro no reconhecimento de voz. Tente novamente.')
+    }
+
+    recognition.onend = () => setIsListening(false)
+
+    recognitionRef.current = recognition
+    recognition.start()
+  }, [isListening])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop()
+      window.speechSynthesis?.cancel()
+    }
+  }, [])
 
   // Load conversations
   const { data: conversations, isLoading: loadingConvs } = useQuery({
@@ -497,10 +667,64 @@ const AIChat: React.FC = () => {
     },
   })
 
+  // ── Autonomous action executor ────────────────────────────────────────────
+  const executeActions = useCallback(async (actions: ParsedAction[]) => {
+    if (!workspaceId || actions.length === 0) return
+
+    for (const action of actions) {
+      try {
+        if (action.type === 'create_task') {
+          const { error } = await supabase.from('tasks').insert({
+            workspace_id: workspaceId,
+            title: action.params.title || 'Nova tarefa',
+            priority: (action.params.priority as 'low' | 'medium' | 'high') || 'medium',
+            status: 'todo',
+            due_at: action.params.due || null,
+            project: action.params.project || null,
+          })
+          if (!error) {
+            qc.invalidateQueries({ queryKey: ['tasks', workspaceId] })
+            toast.success(`✅ Tarefa criada: ${action.params.title}`)
+          }
+        } else if (action.type === 'create_note') {
+          const { error } = await supabase.from('notes').insert({
+            workspace_id: workspaceId,
+            title: action.params.title || 'Nova nota',
+            content: action.params.content || '',
+            category: action.params.category || null,
+          })
+          if (!error) {
+            qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
+            toast.success(`📝 Nota criada: ${action.params.title}`)
+          }
+        } else if (action.type === 'create_reminder') {
+          const remindAt = action.params.remind_at
+            ? new Date(action.params.remind_at).toISOString()
+            : new Date(Date.now() + 60 * 60 * 1000).toISOString()
+          const { error } = await supabase.from('reminders').insert({
+            workspace_id: workspaceId,
+            message: action.params.message || 'Lembrete',
+            title: action.params.title || null,
+            channel: action.params.channel || 'whatsapp',
+            remind_at: remindAt,
+            status: 'scheduled',
+          })
+          if (!error) {
+            qc.invalidateQueries({ queryKey: ['reminders', workspaceId] })
+            toast.success(`🔔 Lembrete agendado!`)
+          }
+        }
+      } catch (e) {
+        console.error('Action execution error:', e)
+      }
+    }
+  }, [workspaceId, qc])
+
   const handleNewChat = () => {
     setSelectedConvId(null)
     setChatMessages([])
     setInput('')
+    window.speechSynthesis?.cancel()
   }
 
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -552,16 +776,27 @@ const AIChat: React.FC = () => {
         signal: ctrl.signal,
         onDelta: (chunk) => {
           accum += chunk
+          const { cleanText } = parseActionsFromText(accum)
           setChatMessages(prev =>
-            prev.map(m => m.id === assistantMsg.id ? { ...m, content: accum, isStreaming: true } : m)
+            prev.map(m => m.id === assistantMsg.id ? { ...m, content: cleanText, isStreaming: true } : m)
           )
         },
         onDone: async () => {
+          const { cleanText, actions } = parseActionsFromText(accum)
           setChatMessages(prev =>
-            prev.map(m => m.id === assistantMsg.id ? { ...m, content: accum, isStreaming: false } : m)
+            prev.map(m => m.id === assistantMsg.id
+              ? { ...m, content: cleanText, isStreaming: false, actions: actions.length > 0 ? actions : undefined }
+              : m
+            )
           )
           setIsStreaming(false)
-          if (convId) await saveMessage(convId, 'assistant', accum)
+
+          // Execute autonomous actions
+          if (actions.length > 0) {
+            await executeActions(actions)
+          }
+
+          if (convId) await saveMessage(convId, 'assistant', cleanText)
           // Update conversation updated_at
           await sb
             .from('ai_conversations')
@@ -582,13 +817,12 @@ const AIChat: React.FC = () => {
       }
       setIsStreaming(false)
     }
-  }, [input, isStreaming, workspaceId, selectedConvId, chatMessages, model, includeContext, deepThink, createConvMut, saveMessage, qc])
+  }, [input, isStreaming, workspaceId, selectedConvId, chatMessages, model, includeContext, deepThink, createConvMut, saveMessage, qc, executeActions])
 
   const handleRegenerate = useCallback(async () => {
     if (isStreaming || chatMessages.length < 2) return
     const lastUser = [...chatMessages].reverse().find(m => m.role === 'user')
     if (!lastUser) return
-    // Remove last assistant message
     setChatMessages(prev => prev.filter((_, i) => i < prev.length - 1))
     setInput(lastUser.content)
     setTimeout(() => handleSend(lastUser.content), 50)
@@ -824,9 +1058,13 @@ const AIChat: React.FC = () => {
                 </div>
                 <h2 className="text-xl font-semibold">Olá! Sou ZYNTRA ✨</h2>
                 <p className="text-sm text-muted-foreground">
-                  Seu assistente de produtividade inteligente. Tenho acesso às suas notas e tarefas.
-                  Como posso te ajudar hoje?
+                  Seu assistente de produtividade inteligente. Posso criar tarefas, notas e lembretes por você.
+                  Tenho acesso às suas notas e tarefas. Como posso te ajudar hoje?
                 </p>
+                <div className="flex items-center gap-2 justify-center text-xs text-muted-foreground">
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>Use o microfone para falar comigo</span>
+                </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
                 {suggestedPrompts.map((prompt, i) => (
@@ -856,16 +1094,37 @@ const AIChat: React.FC = () => {
         {/* Input area */}
         <div className="px-4 py-3 border-t border-border bg-card shrink-0">
           <div className="flex items-end gap-2 max-w-4xl mx-auto">
+            {/* Mic button */}
+            <Button
+              variant={isListening ? 'default' : 'outline'}
+              size="icon"
+              className={cn(
+                'shrink-0 h-11 w-11 transition-all',
+                isListening && 'animate-pulse ring-2 ring-primary ring-offset-2'
+              )}
+              onClick={toggleListening}
+              disabled={isStreaming}
+              title={isListening ? 'Parar gravação' : 'Falar com ZYNTRA (pt-BR)'}
+            >
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </Button>
+
             <div className="flex-1 relative">
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={deepThink ? 'Faça uma pergunta complexa para análise profunda…' : 'Pergunte algo ou peça uma análise… (Enter para enviar, Shift+Enter para nova linha)'}
+                placeholder={
+                  isListening
+                    ? '🎙️ Ouvindo… fale agora'
+                    : deepThink
+                      ? 'Faça uma pergunta complexa para análise profunda…'
+                      : 'Pergunte ou mande criar uma tarefa/nota/lembrete… (Enter para enviar)'
+                }
                 className="min-h-[44px] max-h-36 resize-none pr-2 text-sm"
                 rows={1}
-                disabled={isStreaming}
+                disabled={isStreaming || isListening}
               />
             </div>
             {isStreaming ? (
@@ -884,7 +1143,7 @@ const AIChat: React.FC = () => {
             )}
           </div>
           <p className="text-center text-xs text-muted-foreground mt-1.5">
-            ZYNTRA pode cometer erros. Verifique informações importantes.
+            ZYNTRA pode criar tarefas, notas e lembretes automaticamente. Verifique sempre as ações executadas.
           </p>
         </div>
       </div>

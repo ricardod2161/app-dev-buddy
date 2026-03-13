@@ -280,6 +280,21 @@ const TasksPage: React.FC = () => {
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
 
+  // Keyboard shortcut: T → new task
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 't' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const el = document.activeElement
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)) return
+        e.preventDefault()
+        setEditTask(null)
+        setModalOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const { data: tasks, isLoading } = useQuery({
