@@ -1,12 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import type { Task } from '@/types/database'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,7 @@ import { cn } from '@/lib/utils'
 const taskSchema = z.object({
   title: z.string().min(1, 'Título é obrigatório'),
   description: z.string().optional(),
-  status: z.enum(['todo', 'doing', 'done']),
+  status: z.enum(['todo', 'doing', 'done', 'canceled']),
   priority: z.enum(['low', 'medium', 'high']),
   due_at: z.string().optional(),
   project: z.string().optional(),
@@ -46,10 +47,11 @@ const priorityConfig: Record<Task['priority'], { label: string; class: string }>
   low: { label: '🟢 Baixa', class: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400' },
 }
 
-const statusColumns: { key: Task['status']; label: string; color: string }[] = [
+const statusColumns: { key: Task['status']; label: string; color: string; dimmed?: boolean }[] = [
   { key: 'todo', label: '📋 A Fazer', color: 'border-border' },
   { key: 'doing', label: '🔄 Em Andamento', color: 'border-primary/50' },
   { key: 'done', label: '✅ Concluído', color: 'border-green-500/50' },
+  { key: 'canceled', label: '🚫 Cancelado', color: 'border-muted-foreground/30', dimmed: true },
 ]
 
 // --- Droppable Column ---
