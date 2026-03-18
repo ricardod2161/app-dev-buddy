@@ -139,6 +139,7 @@ Deno.serve(async (req) => {
         `• "Meus lembretes" → ver próximos lembretes\n` +
         `• "Cancela lembrete [título]" → remover lembrete\n\n` +
         `💰 *FINANÇAS*\n` +
+        `• "Registre X reais" ou "marque despesa de X" → registra automaticamente\n` +
         `• "Gastei R$X de [item]" → registra gasto\n` +
         `• "Gastos de hoje" / "do mês" → relatório financeiro\n` +
         `• "Resumo semanal" → resumo da semana\n\n` +
