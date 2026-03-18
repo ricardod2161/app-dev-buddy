@@ -57,7 +57,7 @@ function formatCurrency(value: number): string {
 }
 
 function hasFinancialContent(text: string): boolean {
-  return /R\$|reais|real|\d+\s*(reais|real)|gastei|comprei|paguei|custou|vale\s+\d|valeu\s+\d|gasto\s+de|compra\s+de|me\s+cobrou|quanto\s+fica/i.test(text)
+  return /R\$|reais|real|\d+\s*(reais|real)|gastei|comprei|paguei|custou|vale\s+\d|valeu\s+\d|gasto\s+de|compra\s+de|me\s+cobrou|quanto\s+fica|registre|marque|despesa|despesas|despesa\s+de/i.test(text)
 }
 
 function normalizeFinancialCategory(cat: string | null): boolean {
@@ -139,6 +139,7 @@ Deno.serve(async (req) => {
         `• "Meus lembretes" → ver próximos lembretes\n` +
         `• "Cancela lembrete [título]" → remover lembrete\n\n` +
         `💰 *FINANÇAS*\n` +
+        `• "Registre X reais" ou "marque despesa de X" → registra automaticamente\n` +
         `• "Gastei R$X de [item]" → registra gasto\n` +
         `• "Gastos de hoje" / "do mês" → relatório financeiro\n` +
         `• "Resumo semanal" → resumo da semana\n\n` +
