@@ -57,7 +57,7 @@ function formatCurrency(value: number): string {
 }
 
 function hasFinancialContent(text: string): boolean {
-  return /R\$|reais|real|\d+\s*(reais|real)|gastei|comprei|paguei|custou|vale\s+\d|valeu\s+\d|gasto\s+de|compra\s+de|me\s+cobrou|quanto\s+fica/i.test(text)
+  return /R\$|reais|real|\d+\s*(reais|real)|gastei|comprei|paguei|custou|vale\s+\d|valeu\s+\d|gasto\s+de|compra\s+de|me\s+cobrou|quanto\s+fica|registre|marque|despesa|despesas|despesa\s+de/i.test(text)
 }
 
 function normalizeFinancialCategory(cat: string | null): boolean {
