@@ -1,0 +1,209 @@
+import React, { useState } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/EmptyState'
+import { Wallet, TrendingUp, Calendar, RefreshCw } from 'lucide-react'
+import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
+import { useTotalGuardado } from '../hooks/useTotalGuardado'
+import { useReservaParser } from '../hooks/useReservaParser'
+import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
+import { GastoList } from '../components/GastoList'
+import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
+import { monthLabel, formatBRL } from '../lib/parse-finance'
+import { useQueryClient } from '@tanstack/react-query'
+
+const FinanceDashboard: React.FC = () => {
+  const { workspaceId } = useAuth()
+  const qc = useQueryClient()
+  const [reportMode, setReportMode] = useState<'hoje' | 'mes' | 'reservas'>('mes')
+
+  const { data: gastosMes = [], isLoading: loadingMes } = useGastosMensais(workspaceId)
+  const { data: gastosHoje = [], isLoading: loadingHoje } = useGastosHoje(workspaceId)
+  const { data: totalData, isLoading: loadingMemory } = useTotalGuardado(workspaceId)
+
+  const { reservas, totalReservas } = useReservaParser(gastosMes)
+  const metaDiaria = totalData?.memory?.meta_diaria ?? 40
+  const totalGuardado = totalData?.memory?.total_guardado_mes ?? 0
+  const mesAtual = monthLabel(totalData?.memory?.mes_referencia)
+  const metaMensal = totalData?.meta_mensal ?? metaDiaria * 30
+  const progresso = totalData?.progresso_pct ?? 0
+  const metaDiariaCumprida = totalGuardado >= metaDiaria
+
+  const handleRefresh = () => {
+    qc.invalidateQueries({ queryKey: ['finance-gastos-mes', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['finance-gastos-hoje', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['finance-memory', workspaceId] })
+  }
+
+  if (!workspaceId) {
+    return <EmptyState title="Sem workspace" description="Faça login para acessar suas finanças." icon={Wallet} />
+  }
+
+  const isLoading = loadingMes || loadingHoje || loadingMemory
+
+  return (
+    <div className="flex flex-col gap-4 p-4 sm:p-6 max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Wallet className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold leading-none">Minhas Finanças</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Buddy Financeiro — Paulo</p>
+          </div>
+        </div>
+        <Button variant="ghost" size="icon" onClick={handleRefresh} className="h-8 w-8">
+          <RefreshCw className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {/* Summary cards row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <p className="text-xs text-muted-foreground">Total guardado</p>
+            {isLoading ? (
+              <Skeleton className="h-6 w-24 mt-1" />
+            ) : (
+              <p className="text-lg font-bold text-primary">{formatBRL(totalGuardado)}</p>
+            )}
+            <Badge variant="outline" className="text-[10px] mt-1">
+              {metaDiariaCumprida ? '✅ Meta cumprida' : '⏳ Em andamento'}
+            </Badge>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <p className="text-xs text-muted-foreground">Só reservas</p>
+            {isLoading ? (
+              <Skeleton className="h-6 w-20 mt-1" />
+            ) : (
+              <p className="text-lg font-bold">{formatBRL(totalReservas)}</p>
+            )}
+            <p className="text-[10px] text-muted-foreground mt-1">{reservas.length} registro(s)</p>
+          </CardContent>
+        </Card>
+
+        <Card className="col-span-2 sm:col-span-1">
+          <CardContent className="pt-4 pb-3 px-4">
+            <p className="text-xs text-muted-foreground">Gastos hoje</p>
+            {isLoading ? (
+              <Skeleton className="h-6 w-16 mt-1" />
+            ) : (
+              <p className="text-lg font-bold">
+                {formatBRL(gastosHoje.reduce((s, g) => s + g.valor, 0))}
+              </p>
+            )}
+            <p className="text-[10px] text-muted-foreground mt-1">{gastosHoje.length} lançamento(s)</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Progress card */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-primary" />
+            Progresso da meta
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          {isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          ) : (
+            <MetaDiariaProgress
+              totalGuardado={totalGuardado}
+              metaMensal={metaMensal}
+              metaDiaria={metaDiaria}
+              progresso={progresso}
+              mesLabel={mesAtual}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Report tabs */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-primary" />
+            Relatório WhatsApp
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <Tabs value={reportMode} onValueChange={v => setReportMode(v as typeof reportMode)}>
+            <TabsList className="mb-3 h-8 text-xs">
+              <TabsTrigger value="hoje" className="text-xs px-3">Hoje</TabsTrigger>
+              <TabsTrigger value="mes" className="text-xs px-3">Este mês</TabsTrigger>
+              <TabsTrigger value="reservas" className="text-xs px-3">Reservas</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="hoje">
+              {isLoading ? <Skeleton className="h-24 w-full" /> : (
+                <WhatsAppStyleReport
+                  mode="hoje"
+                  gastos={gastosHoje}
+                  totalGuardado={gastosHoje.reduce((s, g) => s + g.valor, 0)}
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="mes">
+              {isLoading ? <Skeleton className="h-40 w-full" /> : (
+                <WhatsAppStyleReport
+                  mode="mes"
+                  gastos={gastosMes}
+                  totalGuardado={totalGuardado}
+                  metaDiariaCumprida={metaDiariaCumprida}
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="reservas">
+              {isLoading ? <Skeleton className="h-40 w-full" /> : (
+                <WhatsAppStyleReport
+                  mode="reservas"
+                  reservas={reservas}
+                  totalGuardado={totalReservas}
+                />
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Detailed gasto list */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm">Lançamentos do mês</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-5 w-full" />)}
+            </div>
+          ) : (
+            <GastoList
+              gastos={gastosMes}
+              title="Gastos — Este mês"
+              totalLabel="Total guardado este mês"
+              emptyMessage="Nenhum lançamento financeiro encontrado. Envie uma mensagem ao ZYNTRA para registrar gastos!"
+            />
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+export default FinanceDashboard

@@ -12,6 +12,7 @@ import LogsPage from '@/pages/app/Logs'
 import RemindersPage from '@/pages/app/Reminders'
 import ContactsPage from '@/pages/app/Contacts'
 import AIChatPage from '@/pages/app/AIChat'
+import FinanceDashboard from '@/features/finance/pages/FinanceDashboard'
 
 export interface AppRoute {
   path: string
@@ -79,5 +80,10 @@ export const appRoutes: AppRoute[] = [
     path: '/app/ai-chat',
     title: 'Chat IA',
     element: <ErrorBoundary fallbackTitle="Erro no Chat IA"><AIChatPage /></ErrorBoundary>,
+  },
+  {
+    path: '/app/finance',
+    title: 'Minhas Finanças',
+    element: <ErrorBoundary fallbackTitle="Erro nas Finanças"><FinanceDashboard /></ErrorBoundary>,
   },
 ]
