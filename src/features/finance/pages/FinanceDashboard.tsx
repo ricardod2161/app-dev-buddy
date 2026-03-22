@@ -7,14 +7,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, RefreshCw, BarChart2 } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, BarChart2, Sparkles, CheckCircle2 } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservaParser } from '../hooks/useReservaParser'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
+import { cleanDuplicateReservas, type CleanupResult } from '../services/finance.service'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 const FinanceDashboard: React.FC = () => {
   const { workspaceId } = useAuth()
