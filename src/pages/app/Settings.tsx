@@ -493,6 +493,87 @@ const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <BrainCircuit className="w-4 h-4 text-primary" />
+            Memória Financeira
+          </CardTitle>
+          <CardDescription>Total guardado, meta diária e última reserva — dados persistentes usados pelo assistente</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg border bg-muted/40 p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
+                <TrendingUp className="w-3 h-3" /> Total este mês
+              </p>
+              <p className="text-lg font-bold text-primary">{memTotalFmt}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/40 p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-1">Meta diária</p>
+              <p className="text-lg font-bold">{memMetaFmt}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/40 p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-1">Última reserva</p>
+              <p className="text-lg font-bold">{memUltimaReserva}</p>
+            </div>
+          </div>
+
+          {/* Edit meta diária */}
+          <div className="space-y-2">
+            <Label>Meta diária de reserva (R$)</Label>
+            {editingMeta ? (
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  value={metaDiariaInput}
+                  onChange={e => setMetaDiariaInput(e.target.value)}
+                  placeholder="40"
+                  className="w-32"
+                  min={1}
+                />
+                <Button size="sm" onClick={() => saveMemory()} disabled={savingMemory}>
+                  {savingMemory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+                  Salvar
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditingMeta(false)}>Cancelar</Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">Atual: <strong>{memMetaFmt}</strong></span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setMetaDiariaInput(String(userMemory?.meta_diaria ?? 40)); setEditingMeta(true) }}
+                >
+                  Editar
+                </Button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">O assistente usa essa meta ao registrar reservas e responder sobre "E os 40?"</p>
+          </div>
+
+          {/* Reset month */}
+          <div className="flex items-center justify-between pt-2 border-t">
+            <div>
+              <p className="text-sm font-medium">Resetar total do mês</p>
+              <p className="text-xs text-muted-foreground">Zera o total guardado — use no início de cada mês se necessário</p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={resetMonthlyTotal}
+              disabled={savingMemory}
+              className="shrink-0"
+            >
+              {savingMemory ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+              Resetar mês
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       <Button onClick={save} disabled={saving} size="lg" className="w-full sm:w-auto">
         {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
         Salvar Configurações
