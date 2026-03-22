@@ -1007,65 +1007,114 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       // FIX: Always normalize category — never allow "Finanças", always "Financeiro"
       const isFinancial = normalizeFinancialCategory(fnArgs.category) || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
       const finalCategory = isFinancial ? 'Financeiro' : (fnArgs.category ?? 'Geral')
+      const isReserva = /reserva|guardei|guardando/i.test(`${fnArgs.title} ${fnArgs.content}`)
+      let skipInsert = false
 
-      const { error: noteErr } = await supabase.from('notes').insert({
-        workspace_id,
-        title: fnArgs.title,
-        content: fnArgs.content,
-        category: finalCategory,
-        tags: fnArgs.tags ?? [],
-        source_message_id: null,
-      })
-      if (noteErr) console.error('Failed to insert note:', noteErr)
+      // ── Anti-duplicate: if reserva note already exists TODAY, skip creation ──
+      if (isReserva) {
+        const { data: todayReservaNote } = await supabase
+          .from('notes')
+          .select('id, title, content')
+          .eq('workspace_id', workspace_id)
+          .eq('category', 'Financeiro')
+          .ilike('title', '%reserva%')
+          .gte('created_at', todayStart.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
 
-      if (isFinancial) {
-        const fin = extractFinancialValues(`${fnArgs.title} ${fnArgs.content}`)
-        const totalStr = fin.total > 0 ? ` (total: ${formatCurrency(fin.total)})` : ''
-        replyText = fnArgs.reply_message
-          ? fnArgs.reply_message.replace(/\.$/, '') + totalStr + (totalStr ? '.' : '')
-          : `✅ Gasto registrado: ${fnArgs.title}${totalStr}`
-
-        // ── Upsert user_memory when a financial/reserva note is created ──────
-        if (fin.total > 0) {
-          try {
-            const isReserva = /reserva|guardei|guardando/i.test(`${fnArgs.title} ${fnArgs.content}`)
-            const mesMesAtual = now.toISOString().slice(0, 7) // "2026-03"
-            const { data: existingMem } = await supabase
-              .from('user_memory')
-              .select('id, total_guardado_mes, mes_referencia')
-              .eq('workspace_id', workspace_id)
-              .maybeSingle()
-
-            if (existingMem) {
-              // Reset if month changed
-              const currentTotal = existingMem.mes_referencia === mesMesAtual
-                ? Number(existingMem.total_guardado_mes ?? 0) + fin.total
-                : fin.total
-              await supabase
-                .from('user_memory')
-                .update({
-                  total_guardado_mes: currentTotal,
-                  ...(isReserva ? { ultima_reserva_data: now.toISOString().slice(0, 10), ultima_reserva_valor: fin.total } : {}),
-                  mes_referencia: mesMesAtual,
-                })
-                .eq('workspace_id', workspace_id)
-            } else {
-              await supabase
-                .from('user_memory')
-                .insert({
-                  workspace_id,
-                  meta_diaria: 40.00,
-                  total_guardado_mes: fin.total,
-                  ...(isReserva ? { ultima_reserva_data: now.toISOString().slice(0, 10), ultima_reserva_valor: fin.total } : {}),
-                  mes_referencia: mesMesAtual,
-                })
-            }
-          } catch (memErr) {
-            console.warn('[Memory] Failed to upsert user_memory:', memErr)
-          }
+        if (todayReservaNote?.length) {
+          skipInsert = true
+          const existingNote = todayReservaNote[0]
+          console.log(`[Finance] Reserva already exists today (${existingNote.title}) — skipping duplicate creation`)
+          const mesMesAtual = now.toISOString().slice(0, 7)
+          const { data: existingMem } = await supabase
+            .from('user_memory')
+            .select('total_guardado_mes, mes_referencia')
+            .eq('workspace_id', workspace_id)
+            .maybeSingle()
+          const currentTotal = existingMem?.mes_referencia === mesMesAtual
+            ? Number(existingMem?.total_guardado_mes ?? 0)
+            : 40
+          const totalFmt = formatCurrency(currentTotal)
+          replyText = `✅ Reserva de R$ 40,00 já registrada hoje!\n\nTotal guardado este mês: ${totalFmt} 🎯\n\nQuer filtro só reservas? Relatório completo? Só falar.`
         }
-      } else {
-        replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
+      }
+
+      if (!skipInsert) {
+        const { error: noteErr } = await supabase.from('notes').insert({
+          workspace_id,
+          title: fnArgs.title,
+          content: fnArgs.content,
+          category: finalCategory,
+          tags: fnArgs.tags ?? [],
+          source_message_id: null,
+        })
+        if (noteErr) console.error('Failed to insert note:', noteErr)
+
+        if (isFinancial) {
+          // ── FIX: For reserva notes, ALWAYS use R$ 40 (meta diária = valor fixo).
+          // NEVER sum all values in content — content may have adjustment/confirmation lines
+          // that re-state the same R$ 40 in different ways ("Para totalizar R$ 40,00", etc.)
+          // For non-reserva financial notes, extract first monetary value only.
+          let reservaValue: number
+          if (isReserva) {
+            reservaValue = 40 // meta diária fixa do Paulo
+          } else {
+            const firstMatch = (fnArgs.content as string ?? '').match(/R\$\s*([\d]+(?:[.,]\d{1,2})?)/)
+            reservaValue = firstMatch ? parseFloat(firstMatch[1].replace(',', '.')) : 0
+          }
+
+          const mesMesAtual = now.toISOString().slice(0, 7)
+
+          // ── Safe upsert user_memory ──────────────────────────────────────
+          if (reservaValue > 0) {
+            try {
+              const { data: existingMem } = await supabase
+                .from('user_memory')
+                .select('total_guardado_mes, mes_referencia')
+                .eq('workspace_id', workspace_id)
+                .maybeSingle()
+
+              // Reset total when month changes
+              const currentTotal = existingMem?.mes_referencia === mesMesAtual
+                ? Number(existingMem?.total_guardado_mes ?? 0) + reservaValue
+                : reservaValue
+
+              const { error: memErr } = await supabase
+                .from('user_memory')
+                .upsert(
+                  {
+                    workspace_id,
+                    meta_diaria: 40.00,
+                    total_guardado_mes: currentTotal,
+                    mes_referencia: mesMesAtual,
+                    ...(isReserva ? {
+                      ultima_reserva_data: now.toISOString().slice(0, 10),
+                      ultima_reserva_valor: reservaValue,
+                    } : {}),
+                  },
+                  { onConflict: 'workspace_id' }
+                )
+
+              const totalMesFmt = formatCurrency(currentTotal)
+              if (memErr) {
+                console.warn('[Memory] upsert failed:', memErr)
+                replyText = fnArgs.reply_message ?? `✅ ${isReserva ? 'Reserva' : 'Gasto'} registrado: ${fnArgs.title}`
+              } else if (isReserva) {
+                replyText = `✅ Reserva registrada! R$ 40,00 adicionados à sua meta diária.\n\nTotal guardado este mês: ${totalMesFmt} 💰\n\nQuer filtro só reservas? Gráfico? PDF? Só falar, mano!`
+              } else {
+                replyText = fnArgs.reply_message ?? `✅ Gasto registrado: ${fnArgs.title} (${formatCurrency(reservaValue)})`
+              }
+            } catch (memErr) {
+              console.warn('[Memory] Failed to upsert user_memory:', memErr)
+              replyText = fnArgs.reply_message ?? `✅ ${isReserva ? 'Reserva' : 'Gasto'} registrado: ${fnArgs.title}`
+            }
+          } else {
+            replyText = fnArgs.reply_message ?? `✅ Nota financeira criada: ${fnArgs.title}`
+          }
+        } else {
+          replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
+        }
       }
     } else if (fnName === 'update_note') {
       // Find note by fuzzy title match

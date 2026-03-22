@@ -60,42 +60,108 @@ export function parseMonetaryValue(text: string): number | null {
 }
 
 /**
- * Parses and sums ALL monetary values from a multi-line reserva note,
- * deduplicating identical consecutive bullet lines (handles AI duplication bugs).
- *
- * Rules:
- * 1. Split into lines, deduplicate identical trimmed lines
- * 2. Per line: extract first R$ value, ignoring parenthetical "totalizar" clauses
- * 3. Sum all extracted values
- *
- * Example:
- *   "• Reserva Diária: R$ 40,00"                              → +40
- *   "• Ajuste: R$ 120,00 (Para totalizar R$ 240,00 conforme)" → +120  (skip parenthetical)
- *   "• Reserva: R$ 40,00" × 10 duplicates                    → +40 once (dedup)
- *   "• Reserva Adicional: R$ 40,00" × 9 duplicates           → +40 once (dedup)
+ * Lines que indicam ajuste contábil ou consolidação — NÃO representam um novo depósito.
+ * Ex: "• Ajuste de Reserva (22/03): R$ 120,00", "• Reserva Adicional: R$ 40,00"
  */
-export function parseReservaTotalFromContent(content: string): number {
-  if (!content) return 0
+const ADJUSTMENT_KEYWORDS = /\b(ajuste|adicional|totalizar|totalizado|conforme|para\s+totalizar|correção|acumulado|guardado\s+este\s+m[eê]s)\b/i
 
-  // Skip lines that are summary/total/meta lines — they double-count the actual values
-  const SUMMARY_KEYWORDS = /\b(total|totalizando|totalizar|meta|progresso|acumulado|guardado\s+este\s+mês)\b/i
+/**
+ * Lines de resumo/total que repetem valores já contados.
+ */
+const SUMMARY_KEYWORDS = /\b(total|totalizando|meta|progresso)\b/i
+
+/**
+ * Retorna verdadeiro se a linha representa a reserva PRINCIPAL do dia
+ * (ex: "• Reserva Diária: R$ 40,00", "• Reserva: R$ 40,00")
+ */
+const PRIMARY_RESERVA_PATTERN = /^\s*[•\-*]\s*reserva\s*(di[áa]ria|[:])?\s*(r\$|\(|$)/i
+
+/**
+ * Normaliza o conteúdo de uma nota de reserva, mantendo APENAS a linha principal
+ * de reserva e removendo linhas de ajuste, adicional e totalização.
+ *
+ * Regra: uma nota de reserva diária representa UM único valor (a meta diária: R$ 40).
+ * Linhas de "Ajuste", "Adicional", "Para totalizar" são comentários contábeis, não depósitos.
+ */
+export function normalizeReservaContent(content: string): string {
+  if (!content) return content
 
   const lines = content.split('\n')
+  const normalized: string[] = []
   const seen = new Set<string>()
-  let total = 0
 
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
 
-    // Skip summary/confirmation lines that repeat an already-counted value
+    // Skip adjustment/consolidation lines
+    if (ADJUSTMENT_KEYWORDS.test(trimmed)) continue
+    // Skip summary/total lines
+    if (SUMMARY_KEYWORDS.test(trimmed)) continue
+
+    // Deduplicate identical lines
+    if (seen.has(trimmed)) continue
+    seen.add(trimmed)
+
+    normalized.push(line)
+  }
+
+  // Remove trailing blank lines
+  while (normalized.length && !normalized[normalized.length - 1].trim()) normalized.pop()
+
+  return normalized.join('\n') || content // fallback to original if all lines were filtered
+}
+
+/**
+ * Parses and sums monetary values from a reserva note.
+ *
+ * KEY RULE: A daily reserva note represents ONE deposit (meta diária = R$ 40).
+ * Lines with "Ajuste", "Adicional", "Para totalizar", "conforme" are accounting
+ * comments about the SAME deposit — they must NOT be summed again.
+ *
+ * Algorithm:
+ * 1. Split into lines, skip adjustment/summary lines
+ * 2. Deduplicate identical trimmed lines
+ * 3. Extract first R$ value per remaining line
+ * 4. If we find a "primary" reserva line → return its value only (one deposit)
+ * 5. Fallback: sum all remaining unique values
+ */
+export function parseReservaTotalFromContent(content: string): number {
+  if (!content) return 0
+
+  const lines = content.split('\n')
+  const seen = new Set<string>()
+  const validLines: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+
+    // Skip adjustment/consolidation lines — they re-state already-counted values
+    if (ADJUSTMENT_KEYWORDS.test(trimmed)) continue
+    // Skip summary/total lines — they double-count
     if (SUMMARY_KEYWORDS.test(trimmed)) continue
 
     // Deduplicate identical lines (AI bug: same bullet repeated 10×)
     if (seen.has(trimmed)) continue
     seen.add(trimmed)
 
-    const val = parseFirstValueFromLine(trimmed)
+    validLines.push(trimmed)
+  }
+
+  // If we have a clear primary reserva line, return ONLY that value.
+  // This prevents "Reserva Diária: R$40" + "Reserva: R$40" = R$80 (same day, same deposit).
+  for (const line of validLines) {
+    if (PRIMARY_RESERVA_PATTERN.test(line)) {
+      const val = parseFirstValueFromLine(line)
+      if (val !== null) return val
+    }
+  }
+
+  // Fallback: sum all valid lines (should be just 1-2 for a clean note)
+  let total = 0
+  for (const line of validLines) {
+    const val = parseFirstValueFromLine(line)
     if (val !== null) total += val
   }
 

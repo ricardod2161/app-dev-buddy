@@ -7,14 +7,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2 } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2, Calculator } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
-import { useReservaParser } from '../hooks/useReservaParser'
+import { useReservasMensais } from '../hooks/useReservasMensais'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
-import { cleanDuplicateReservas, type CleanupResult } from '../services/finance.service'
+import { cleanDuplicateReservas, recalcularTotalGuardado, type CleanupResult } from '../services/finance.service'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
@@ -23,20 +23,19 @@ const FinanceDashboard: React.FC = () => {
   const qc = useQueryClient()
   const [reportMode, setReportMode] = useState<'hoje' | 'mes' | 'reservas'>('mes')
   const [cleaning, setCleaning] = useState(false)
+  const [recalculating, setRecalculating] = useState(false)
   const [lastCleanup, setLastCleanup] = useState<CleanupResult | null>(null)
 
   const { data: gastosMes = [], isLoading: loadingMes } = useGastosMensais(workspaceId)
   const { data: gastosHoje = [], isLoading: loadingHoje } = useGastosHoje(workspaceId)
   const { data: totalData, isLoading: loadingMemory } = useTotalGuardado(workspaceId)
+  const { reservas, totalReservas, isLoading: loadingReservas } = useReservasMensais(workspaceId)
 
-  const { reservas, totalReservas } = useReservaParser(gastosMes)
   const metaDiaria = totalData?.memory?.meta_diaria ?? 40
 
-  // Derive total guardado from real-time notes (reservas) instead of stale user_memory
-  // Fall back to user_memory only if no reservas found in current month's notes
-  const totalGuardadoFromNotes = totalReservas
-  const totalGuardadoFromMemory = totalData?.memory?.total_guardado_mes ?? 0
-  const totalGuardado = totalGuardadoFromNotes > 0 ? totalGuardadoFromNotes : totalGuardadoFromMemory
+  // Total guardado vem diretamente das notas de reserva (parser correto: R$40/nota)
+  // Fallback para user_memory apenas se não houver notas no mês ainda
+  const totalGuardado = totalReservas > 0 ? totalReservas : (totalData?.memory?.total_guardado_mes ?? 0)
 
   const mesAtual = monthLabel(totalData?.memory?.mes_referencia)
   const metaMensal = totalData?.meta_mensal ?? metaDiaria * 30
@@ -49,6 +48,7 @@ const FinanceDashboard: React.FC = () => {
     qc.invalidateQueries({ queryKey: ['finance-gastos-hoje', workspaceId] })
     qc.invalidateQueries({ queryKey: ['finance-memory', workspaceId] })
     qc.invalidateQueries({ queryKey: ['finance-historico-mensal', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['finance-reservas-mes', workspaceId] })
   }
 
   const handleClean = async () => {
@@ -58,12 +58,12 @@ const FinanceDashboard: React.FC = () => {
     try {
       const result = await cleanDuplicateReservas(workspaceId)
       setLastCleanup(result)
-      const total = result.notesFixed + result.notesMerged
+      const total = result.notesFixed + result.notesMerged + result.notesNormalized
       if (total === 0) {
         toast.success('Nenhuma duplicata encontrada — notas já estão limpas ✅')
       } else {
         toast.success(
-          `Limpeza concluída: ${result.notesFixed} nota(s) corrigida(s), ${result.notesMerged} mesclada(s)`,
+          `Limpeza: ${result.notesFixed} corrigida(s), ${result.notesNormalized} normalizada(s), ${result.notesMerged} mesclada(s)`,
         )
         invalidateAll()
       }
@@ -74,11 +74,25 @@ const FinanceDashboard: React.FC = () => {
     }
   }
 
+  const handleRecalcular = async () => {
+    if (!workspaceId) return
+    setRecalculating(true)
+    try {
+      const { total, notasContadas } = await recalcularTotalGuardado(workspaceId)
+      toast.success(`Total recalculado: ${formatBRL(total)} (${notasContadas} nota(s) de reserva)`)
+      invalidateAll()
+    } catch (err) {
+      toast.error('Erro ao recalcular: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setRecalculating(false)
+    }
+  }
+
   if (!workspaceId) {
     return <EmptyState title="Sem workspace" description="Faça login para acessar suas finanças." icon={Wallet} />
   }
 
-  const isLoading = loadingMes || loadingHoje || loadingMemory
+  const isLoading = loadingMes || loadingHoje || loadingMemory || loadingReservas
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6 max-w-4xl mx-auto">
@@ -99,13 +113,26 @@ const FinanceDashboard: React.FC = () => {
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            title="Limpar notas duplicadas"
+            title="Limpar notas duplicadas e linhas de ajuste"
             onClick={handleClean}
             disabled={cleaning}
           >
             {cleaning
               ? <RefreshCw className="w-4 h-4 animate-spin" />
               : <Sparkles className="w-4 h-4" />
+            }
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Recalcular total guardado (reprocessa todas as notas)"
+            onClick={handleRecalcular}
+            disabled={recalculating}
+          >
+            {recalculating
+              ? <RefreshCw className="w-4 h-4 animate-spin" />
+              : <Calculator className="w-4 h-4" />
             }
           </Button>
           <Button variant="ghost" size="icon" asChild className="h-8 w-8">
@@ -120,7 +147,7 @@ const FinanceDashboard: React.FC = () => {
       </div>
 
       {/* ── Cleanup result banner ── */}
-      {lastCleanup && (lastCleanup.notesFixed > 0 || lastCleanup.notesMerged > 0) && (
+      {lastCleanup && (lastCleanup.notesFixed > 0 || lastCleanup.notesMerged > 0 || lastCleanup.notesNormalized > 0) && (
         <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
           <div className="flex items-center gap-1.5 font-semibold text-primary">
             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -156,7 +183,7 @@ const FinanceDashboard: React.FC = () => {
             ) : (
               <p className="text-base font-bold leading-tight mt-0.5">{formatBRL(totalReservas)}</p>
             )}
-            <p className="text-[9px] text-muted-foreground mt-1">{reservas.length} item(s)</p>
+            <p className="text-[9px] text-muted-foreground mt-1">{reservas.length} nota(s)</p>
           </CardContent>
         </Card>
 

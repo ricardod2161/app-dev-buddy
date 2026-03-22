@@ -1,6 +1,12 @@
 import { supabase } from '@/integrations/supabase/client'
 import type { FinanceMemory, GastoEntry, ReservaEntry, MesHistorico } from '../types/transaction.types'
-import { parseMonetaryValue, parseReservaTotalFromContent, formatDateDDMM, currentMonthKey } from '../lib/parse-finance'
+import {
+  parseMonetaryValue,
+  parseReservaTotalFromContent,
+  normalizeReservaContent,
+  formatDateDDMM,
+  currentMonthKey,
+} from '../lib/parse-finance'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -29,13 +35,15 @@ function deduplicateContentLines(content: string): { cleaned: string; hadDups: b
 export interface CleanupResult {
   notesFixed: number    // notes whose content had duplicate lines removed
   notesMerged: number   // same-day notes merged into one
+  notesNormalized: number // notes cleaned of adjustment lines
   details: string[]     // human-readable log of changes
 }
 
 /**
  * Cleans up duplicate reserva notes for a workspace:
  * 1. Deduplicates repeated bullet lines within each reserva note
- * 2. Merges multiple reserva notes created on the same calendar day into one
+ * 2. Normalizes content — removes "Ajuste", "Adicional", "totalizar" lines
+ * 3. Merges multiple reserva notes created on the same calendar day into one
  */
 export async function cleanDuplicateReservas(workspaceId: string): Promise<CleanupResult> {
   // Fetch ALL historical reserva notes (no date filter)
@@ -50,7 +58,7 @@ export async function cleanDuplicateReservas(workspaceId: string): Promise<Clean
   if (error) throw error
   const notes = data ?? []
 
-  const result: CleanupResult = { notesFixed: 0, notesMerged: 0, details: [] }
+  const result: CleanupResult = { notesFixed: 0, notesMerged: 0, notesNormalized: 0, details: [] }
 
   // ── Step 1: deduplicate content lines ────────────────────────────────────
   for (const note of notes) {
@@ -67,6 +75,32 @@ export async function cleanDuplicateReservas(workspaceId: string): Promise<Clean
     }
   }
 
+  // ── Step 2: normalize content — remove adjustment/additional lines ────────
+  // Re-fetch after step 1 (content may have changed)
+  const { data: afterDedup, error: dedupErr } = await supabase
+    .from('notes')
+    .select('id, title, content, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('category', 'Financeiro')
+    .or('title.ilike.%reserva%,content.ilike.%reserva%')
+    .order('created_at', { ascending: true })
+
+  if (dedupErr) throw dedupErr
+
+  for (const note of afterDedup ?? []) {
+    if (!note.content) continue
+    const normalized = normalizeReservaContent(note.content)
+    if (normalized !== note.content) {
+      const { error: upErr } = await supabase
+        .from('notes')
+        .update({ content: normalized })
+        .eq('id', note.id)
+      if (upErr) throw upErr
+      result.notesNormalized++
+      result.details.push(`Normalizei linhas de ajuste em "${note.title ?? note.id}"`)
+    }
+  }
+
   // Reload notes after content cleanup (content changed)
   const { data: fresh, error: freshErr } = await supabase
     .from('notes')
@@ -78,7 +112,7 @@ export async function cleanDuplicateReservas(workspaceId: string): Promise<Clean
 
   if (freshErr) throw freshErr
 
-  // ── Step 2: merge same-day notes ─────────────────────────────────────────
+  // ── Step 3: merge same-day notes ─────────────────────────────────────────
   const byDay: Record<string, typeof fresh> = {}
   for (const note of fresh ?? []) {
     // Use UTC date so timezone doesn't split a day across two buckets
@@ -92,12 +126,13 @@ export async function cleanDuplicateReservas(workspaceId: string): Promise<Clean
 
     const [primary, ...rest] = dayNotes
 
-    // Merge all content into the primary note, then deduplicate lines
+    // Merge all content into the primary note, then deduplicate + normalize lines
     const combinedContent = [primary!.content ?? '', ...rest.map(n => n.content ?? '')]
       .filter(Boolean)
       .join('\n\n')
 
     const { cleaned: mergedContent } = deduplicateContentLines(combinedContent)
+    const finalContent = normalizeReservaContent(mergedContent)
 
     // Recalculate a clean title
     const mergedTitle = primary!.title ?? `Gasto com Reserva (${day.substring(8, 10)}/${day.substring(5, 7)})`
@@ -105,7 +140,7 @@ export async function cleanDuplicateReservas(workspaceId: string): Promise<Clean
     // Update primary
     const { error: upErr } = await supabase
       .from('notes')
-      .update({ title: mergedTitle, content: mergedContent })
+      .update({ title: mergedTitle, content: finalContent })
       .eq('id', primary!.id)
     if (upErr) throw upErr
 
@@ -123,6 +158,59 @@ export async function cleanDuplicateReservas(workspaceId: string): Promise<Clean
   }
 
   return result
+}
+
+/**
+ * Recalcula o total guardado no mês atual diretamente das notas de reserva.
+ * Usa o parser corrigido (R$ 40 por nota, ignora ajustes).
+ * Atualiza a user_memory com o valor correto.
+ */
+export async function recalcularTotalGuardado(workspaceId: string): Promise<{ total: number; notasContadas: number }> {
+  const now = new Date()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const mesMesAtual = now.toISOString().slice(0, 7) // "2026-03"
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select('id, title, content, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('category', 'Financeiro')
+    .or('title.ilike.%reserva%,content.ilike.%reserva%')
+    .gte('created_at', startOfMonth)
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+
+  const notes = data ?? []
+  let total = 0
+  let notasContadas = 0
+
+  for (const note of notes) {
+    const fullText = [note.title ?? '', note.content ?? ''].join('\n')
+    const valor = parseReservaTotalFromContent(fullText)
+    if (valor > 0) {
+      total += valor
+      notasContadas++
+    }
+  }
+
+  // Upsert user_memory com o valor calculado
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: upsertErr } = await (supabase as any)
+    .from('user_memory')
+    .upsert(
+      {
+        workspace_id: workspaceId,
+        meta_diaria: 40.00,
+        total_guardado_mes: total,
+        mes_referencia: mesMesAtual,
+      },
+      { onConflict: 'workspace_id' }
+    )
+
+  if (upsertErr) throw upsertErr
+
+  return { total, notasContadas }
 }
 
 function noteToGasto(note: { id: string; title: string | null; content: string | null; category: string | null; created_at: string }): GastoEntry {
@@ -159,20 +247,35 @@ export async function getGastosMes(workspaceId: string): Promise<GastoEntry[]> {
 }
 
 /**
- * Fetches only reserva-tagged financial notes.
+ * Fetches only reserva-tagged financial notes — uses smart parser for correct valor.
  */
 export async function getReservasMes(workspaceId: string): Promise<ReservaEntry[]> {
-  const gastos = await getGastosMes(workspaceId)
-  return gastos
-    .filter(g => g.tipo === 'reserva')
-    .map(g => ({
-      id: g.id,
-      title: g.title,
-      valor: g.valor,
-      data: g.data,
-      data_iso: g.data_iso,
+  const now = new Date()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select('id, title, content, category, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('category', 'Financeiro')
+    .or('title.ilike.%reserva%,content.ilike.%reserva%')
+    .gte('created_at', startOfMonth)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+
+  return (data ?? []).map(note => {
+    const fullText = [note.title ?? '', note.content ?? ''].join('\n')
+    const valor = parseReservaTotalFromContent(fullText)
+    return {
+      id: note.id,
+      title: note.title ?? 'Sem título',
+      valor,
+      data: formatDateDDMM(note.created_at),
+      data_iso: note.created_at,
       tipo: 'reserva' as const,
-    }))
+    }
+  }).filter(r => r.valor > 0)
 }
 
 /**
@@ -232,7 +335,9 @@ export async function upsertFinanceMemory(
 /**
  * Returns monthly reserva totals for the last N months.
  * ONLY counts notes where title or content contains "reserva" (case-insensitive).
- * Uses smart dedup-sum parser to handle AI duplication bugs and multi-value notes.
+ * Uses the smart parser to handle multi-line notes correctly:
+ * — Each note = ONE daily deposit (R$ 40)
+ * — Adjustment lines ("Ajuste", "Adicional") are ignored
  */
 export async function getHistoricoMensal(workspaceId: string, months = 12): Promise<MesHistorico[]> {
   const now = new Date()
@@ -250,12 +355,11 @@ export async function getHistoricoMensal(workspaceId: string, months = 12): Prom
 
   if (error) throw error
 
-  // Group by YYYY-MM, summing all unique monetary values per note
+  // Group by YYYY-MM, using smart parser to get correct value per note
   const byMonth: Record<string, number> = {}
   for (const note of data ?? []) {
     const d = new Date(note.created_at!)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    // Use smart parser: sums all unique lines, skips duplicates
     const fullText = [note.title ?? '', note.content ?? ''].join('\n')
     const valor = parseReservaTotalFromContent(fullText)
     byMonth[key] = (byMonth[key] ?? 0) + valor
