@@ -526,6 +526,50 @@ export type Database = {
           },
         ]
       }
+      user_memory: {
+        Row: {
+          created_at: string | null
+          id: string
+          mes_referencia: string | null
+          meta_diaria: number
+          total_guardado_mes: number
+          ultima_reserva_data: string | null
+          ultima_reserva_valor: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          mes_referencia?: string | null
+          meta_diaria?: number
+          total_guardado_mes?: number
+          ultima_reserva_data?: string | null
+          ultima_reserva_valor?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          mes_referencia?: string | null
+          meta_diaria?: number
+          total_guardado_mes?: number
+          ultima_reserva_data?: string | null
+          ultima_reserva_valor?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_memory_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           created_at: string | null

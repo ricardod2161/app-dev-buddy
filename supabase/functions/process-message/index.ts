@@ -241,6 +241,7 @@ Deno.serve(async (req) => {
       { data: pendingTasks },
       { data: upcomingReminders },
       { data: todayFinancialNotes },
+      { data: userMemory },
     ] = await Promise.all([
       // conversation history — 8 for simple, 12 for complex
       supabase
@@ -282,6 +283,12 @@ Deno.serve(async (req) => {
             .or(`category.eq.Financeiro,title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%`)
             .gte('created_at', todayStart.toISOString())
         : Promise.resolve({ data: [] as { title: string | null; content: string | null }[], error: null }),
+      // persistent financial memory
+      supabase
+        .from('user_memory')
+        .select('meta_diaria, total_guardado_mes, ultima_reserva_data, ultima_reserva_valor, mes_referencia')
+        .eq('workspace_id', workspace_id)
+        .maybeSingle(),
     ])
 
     const history = (historyRows ?? []).reverse()
@@ -435,6 +442,19 @@ Deno.serve(async (req) => {
       ? `\n💰 Gastos registrados hoje (${todayShort}): ${formatCurrency(todaySpendTotal)}`
       : ''
 
+    // Build memory context block from persistent user_memory
+    const memoryBlock = userMemory
+      ? (() => {
+          const mesNome = new Date().toLocaleDateString('pt-BR', { timeZone: tz, month: 'long', year: 'numeric' })
+          const ultimaReservaStr = userMemory.ultima_reserva_data
+            ? new Date(userMemory.ultima_reserva_data).toLocaleDateString('pt-BR', { timeZone: tz, day: '2-digit', month: '2-digit' })
+            : 'nenhuma ainda'
+          const totalFmt = Number(userMemory.total_guardado_mes ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          const metaFmt = Number(userMemory.meta_diaria ?? 40).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          return `\n\n## 🧠 MEMÓRIA FINANCEIRA PERSISTENTE (valores reais do banco):\n- Meta diária: ${metaFmt}\n- Total guardado este mês (${mesNome}): ${totalFmt}\n- Última reserva: ${ultimaReservaStr}${userMemory.ultima_reserva_valor ? ` — ${Number(userMemory.ultima_reserva_valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : ''}\n- OBRIGATÓRIO: use esses valores reais ao responder. NUNCA invente totais.`
+        })()
+      : '\n\n## 🧠 MEMÓRIA FINANCEIRA:\n- Meta diária: R$ 40,00\n- Total guardado este mês: R$ 0,00 (sem registros ainda)'
+
     const contactContext = contactName
       ? `\n## Usuário\nO usuário se chama **${contactName}**.${contactNotes ? ` Observações: ${contactNotes}` : ''} Use o nome dele nas respostas de forma natural.`
       : ''
@@ -532,6 +552,7 @@ ${tasksContext}
 
 **Próximos lembretes (${upcomingReminders?.length ?? 0}):**
 ${remindersContext}${financialContext}
+${memoryBlock}
 
 ## Tratamento de Áudio 🎤
 ${message_type === 'audio' ? `A mensagem atual é um ÁUDIO transcrito. Regras obrigatórias:
@@ -926,9 +947,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             messages: aiMessages,
             tools: toolDefinitions,
             tool_choice: 'required',
-            temperature: 0.3,
-            top_p: 0.85,
-            max_tokens: 1200,
+            temperature: 0.2,
+            top_p: 0.9,
+            max_tokens: 1500,
           }),
         })
 
@@ -1003,6 +1024,46 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         replyText = fnArgs.reply_message
           ? fnArgs.reply_message.replace(/\.$/, '') + totalStr + (totalStr ? '.' : '')
           : `✅ Gasto registrado: ${fnArgs.title}${totalStr}`
+
+        // ── Upsert user_memory when a financial/reserva note is created ──────
+        if (fin.total > 0) {
+          try {
+            const isReserva = /reserva|guardei|guardando/i.test(`${fnArgs.title} ${fnArgs.content}`)
+            const mesMesAtual = now.toISOString().slice(0, 7) // "2026-03"
+            const { data: existingMem } = await supabase
+              .from('user_memory')
+              .select('id, total_guardado_mes, mes_referencia')
+              .eq('workspace_id', workspace_id)
+              .maybeSingle()
+
+            if (existingMem) {
+              // Reset if month changed
+              const currentTotal = existingMem.mes_referencia === mesMesAtual
+                ? Number(existingMem.total_guardado_mes ?? 0) + fin.total
+                : fin.total
+              await supabase
+                .from('user_memory')
+                .update({
+                  total_guardado_mes: currentTotal,
+                  ...(isReserva ? { ultima_reserva_data: now.toISOString().slice(0, 10), ultima_reserva_valor: fin.total } : {}),
+                  mes_referencia: mesMesAtual,
+                })
+                .eq('workspace_id', workspace_id)
+            } else {
+              await supabase
+                .from('user_memory')
+                .insert({
+                  workspace_id,
+                  meta_diaria: 40.00,
+                  total_guardado_mes: fin.total,
+                  ...(isReserva ? { ultima_reserva_data: now.toISOString().slice(0, 10), ultima_reserva_valor: fin.total } : {}),
+                  mes_referencia: mesMesAtual,
+                })
+            }
+          } catch (memErr) {
+            console.warn('[Memory] Failed to upsert user_memory:', memErr)
+          }
+        }
       } else {
         replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
       }

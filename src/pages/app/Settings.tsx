@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2, Sunrise } from 'lucide-react'
+import { X, Plus, Save, Loader2, Search, Bot, Sparkles, Volume2, Sunrise, BrainCircuit, RefreshCw, TrendingUp } from 'lucide-react'
 
 const BRIEFING_TIMES = [
   '05:00', '05:30', '06:00', '06:30', '07:00', '07:30',
@@ -47,6 +47,20 @@ const SettingsPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  const { data: userMemory, refetch: refetchMemory } = useQuery({
+    queryKey: ['user-memory', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return null
+      const { data } = await supabase
+        .from('user_memory')
+        .select('id, meta_diaria, total_guardado_mes, ultima_reserva_data, ultima_reserva_valor, mes_referencia')
+        .eq('workspace_id', workspaceId)
+        .maybeSingle()
+      return data
+    },
+    enabled: !!workspaceId,
+  })
+
   const [categories, setCategories] = useState<string[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [botFormat, setBotFormat] = useState<WorkspaceSettings['bot_response_format']>('medio')
@@ -63,6 +77,9 @@ const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [tzSearch, setTzSearch] = useState('')
   const [isDirty, setIsDirty] = useState(false)
+  const [editingMeta, setEditingMeta] = useState(false)
+  const [metaDiariaInput, setMetaDiariaInput] = useState('40')
+  const [savingMemory, setSavingMemory] = useState(false)
 
   const markDirty = React.useCallback(() => setIsDirty(true), [])
 
@@ -135,6 +152,42 @@ const SettingsPage: React.FC = () => {
     }
   }
 
+  const saveMemory = async (newMeta?: number) => {
+    if (!workspaceId) return
+    setSavingMemory(true)
+    try {
+      const payload = { meta_diaria: (newMeta ?? (Number(metaDiariaInput) || 40)) }
+      if (userMemory?.id) {
+        await supabase.from('user_memory').update(payload).eq('workspace_id', workspaceId)
+      } else {
+        await supabase.from('user_memory').insert({ workspace_id: workspaceId, ...payload })
+      }
+      toast.success('Meta diária salva!')
+      refetchMemory()
+      setEditingMeta(false)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
+  const resetMonthlyTotal = async () => {
+    if (!workspaceId) return
+    setSavingMemory(true)
+    try {
+      await supabase
+        .from('user_memory')
+        .upsert({ workspace_id: workspaceId, total_guardado_mes: 0, mes_referencia: new Date().toISOString().slice(0, 7) }, { onConflict: 'workspace_id' })
+      toast.success('Total do mês resetado para R$ 0,00')
+      refetchMemory()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao resetar')
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
   if (isLoading) return (
     <div className="space-y-4 max-w-2xl">
       {[...Array(4)].map((_, i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />)}
@@ -151,12 +204,18 @@ const SettingsPage: React.FC = () => {
     if (v && !tags.includes(v)) { setTags(prev => [...prev, v]); setNewTag('') }
   }
 
+  const memTotalFmt = Number(userMemory?.total_guardado_mes ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const memMetaFmt = Number(userMemory?.meta_diaria ?? 40).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const memUltimaReserva = userMemory?.ultima_reserva_data
+    ? new Date(userMemory.ultima_reserva_data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    : '—'
+
   return (
     <div className="space-y-6 max-w-2xl animate-slide-up">
       {/* Unsaved changes banner */}
       {isDirty && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 border border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-700">
-          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">⚠️ Você tem alterações não salvas</span>
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-warning/10 border border-warning/30">
+          <span className="text-sm font-medium text-warning-foreground">⚠️ Você tem alterações não salvas</span>
         </div>
       )}
       {/* Nome do assistente */}
@@ -430,6 +489,87 @@ const SettingsPage: React.FC = () => {
                 <SelectItem value="en-US">🇺🇸 English (US)</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <BrainCircuit className="w-4 h-4 text-primary" />
+            Memória Financeira
+          </CardTitle>
+          <CardDescription>Total guardado, meta diária e última reserva — dados persistentes usados pelo assistente</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg border bg-muted/40 p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
+                <TrendingUp className="w-3 h-3" /> Total este mês
+              </p>
+              <p className="text-lg font-bold text-primary">{memTotalFmt}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/40 p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-1">Meta diária</p>
+              <p className="text-lg font-bold">{memMetaFmt}</p>
+            </div>
+            <div className="rounded-lg border bg-muted/40 p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-1">Última reserva</p>
+              <p className="text-lg font-bold">{memUltimaReserva}</p>
+            </div>
+          </div>
+
+          {/* Edit meta diária */}
+          <div className="space-y-2">
+            <Label>Meta diária de reserva (R$)</Label>
+            {editingMeta ? (
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  value={metaDiariaInput}
+                  onChange={e => setMetaDiariaInput(e.target.value)}
+                  placeholder="40"
+                  className="w-32"
+                  min={1}
+                />
+                <Button size="sm" onClick={() => saveMemory()} disabled={savingMemory}>
+                  {savingMemory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+                  Salvar
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditingMeta(false)}>Cancelar</Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">Atual: <strong>{memMetaFmt}</strong></span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setMetaDiariaInput(String(userMemory?.meta_diaria ?? 40)); setEditingMeta(true) }}
+                >
+                  Editar
+                </Button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">O assistente usa essa meta ao registrar reservas e responder sobre "E os 40?"</p>
+          </div>
+
+          {/* Reset month */}
+          <div className="flex items-center justify-between pt-2 border-t">
+            <div>
+              <p className="text-sm font-medium">Resetar total do mês</p>
+              <p className="text-xs text-muted-foreground">Zera o total guardado — use no início de cada mês se necessário</p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={resetMonthlyTotal}
+              disabled={savingMemory}
+              className="shrink-0"
+            >
+              {savingMemory ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+              Resetar mês
+            </Button>
           </div>
         </CardContent>
       </Card>
