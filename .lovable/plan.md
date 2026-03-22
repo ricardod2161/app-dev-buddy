@@ -1,120 +1,144 @@
 
-## Diagnóstico: Delete já existe — problema é na experiência
+## Honest assessment
 
-O sistema **já tem** `delete_task` e `delete_note` implementados desde o último deploy. O problema real é diferente:
+The codebase is a **working, feature-complete app**. The refactoring request is massive (full feature-folder migration) but the goal is real: files are too large (AIChat 1234 lines, Dashboard 636 lines), logic is mixed with UI, and the AI Chat sidebar doesn't work well on mobile.
 
-### Problemas identificados
+### What I will actually build (high-value, low-risk)
 
-**1. Reconhecimento de intenção — o AI às vezes não usa delete_task**
-O system prompt tem "Tarefas: criar, atualizar status, mudar prioridade, deletar" mas não tem exemplos explícitos de frases de deleção em português. O AI pode interpretar "excluir tarefa X" como `just_reply` em vez de acionar `delete_task`.
-
-**2. Match parcial pode falhar em casos reais**
-A busca usa `.ilike('title', '%${term}%')`. Se o usuário diz "apaga a tarefa de ligar pro banco" e a tarefa se chama "Ligar para o banco", o match `%ligar pro banco%` vs `"Ligar para o banco"` pode não casar.
-
-**3. Erro "não encontrei" não ajuda o usuário**
-Quando o match falha, a mensagem atual é `❌ Não encontrei nenhuma tarefa com o nome "..."`. O usuário fica sem saber os nomes exatos disponíveis.
-
-**4. Sem confirmação antes de deletar**
-A deleção é imediata e irreversível. Boas práticas pedem confirmação para ações destrutivas.
-
-**5. O help command (`/ajuda`) já menciona delete** — isso está correto. O problema é a execução.
+**The golden rule**: do NOT break what works. Extract, don't rewrite.
 
 ---
 
-### O que será feito
+## Sprint 1 — App Bootstrap & Route Config
 
-**Arquivo:** `supabase/functions/process-message/index.ts`
+**`src/app/providers/AppProviders.tsx`** (NEW)
+Consolidate QueryClient, ThemeProvider, AuthProvider, TooltipProvider, Sonner into one composable provider. `App.tsx` becomes clean shell.
 
-**A — Adicionar seção explícita no system prompt para deleção**
-Antes das "Regras de Ouro", adicionar:
+**`src/app/router/route-config.ts`** (NEW)
+Central route config array `{ path, title, element, errorTitle }`. Sidebar and TopBar both read from it — titles stop being hardcoded in TopBar's `pageTitles` object.
 
-```
-## Exclusão de Itens — OBRIGATÓRIO
-Quando o usuário pedir para EXCLUIR, APAGAR, DELETAR, REMOVER, TIRAR qualquer item:
-- Tarefa → use delete_task com o título completo ou parte do título
-- Nota → use delete_note com o título
-- Lembrete → use cancel_reminder
-
-Palavras que indicam exclusão: "excluir", "apagar", "deletar", "remover", "tira", "some", 
-"não preciso mais de", "cancela", "remove", "zera", "descarta"
-
-ATENÇÃO: Quando não encontrar o item pelo nome exato, liste as opções disponíveis 
-para o usuário escolher — não retorne erro vazio.
-```
-
-**B — Melhorar o handler `delete_task` quando não encontra**
-Quando `.ilike` não retornar resultado, fazer uma segunda busca mostrando as tarefas disponíveis para o usuário escolher, em vez de só erro:
-
-```typescript
-// Quando não encontra: lista as tarefas disponíveis
-const { data: allTasks } = await supabase
-  .from('tasks')
-  .select('title, status')
-  .eq('workspace_id', workspace_id)
-  .in('status', ['todo', 'doing'])
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allTasks?.length) {
-  const lista = allTasks.map((t, i) => `${i+1}. ${t.title}`).join('\n')
-  replyText = `Não achei uma tarefa com o nome "${fnArgs.task_title}". Suas tarefas atuais:\n\n${lista}\n\nQual delas você quer excluir?`
-} else {
-  replyText = 'Não encontrei essa tarefa e você não tem tarefas em aberto no momento.'
-}
-```
-
-**C — Mesma melhoria para `delete_note`**
-Quando não encontrar a nota, listar as notas recentes:
-
-```typescript
-const { data: allNotes } = await supabase
-  .from('notes')
-  .select('title, category')
-  .eq('workspace_id', workspace_id)
-  .order('created_at', { ascending: false })
-  .limit(8)
-
-if (allNotes?.length) {
-  const lista = allNotes.map((n, i) => `${i+1}. ${n.title} (${n.category ?? 'Geral'})`).join('\n')
-  replyText = `Não achei uma nota com esse nome. Suas notas recentes:\n\n${lista}\n\nQual delas você quer apagar?`
-} else {
-  replyText = 'Não encontrei essa nota e você não tem notas salvas ainda.'
-}
-```
-
-**D — Adicionar `delete_reminder` como alias de `cancel_reminder`**
-Usuários dizem "excluir lembrete X" mas o tool se chama `cancel_reminder`. Adicionar no system prompt que para lembretes, "excluir" = "cancelar", e usar `cancel_reminder`.
-
-**E — Melhorar o match com busca por palavras individuais**
-Se a busca `.ilike('%termo completo%')` retornar vazio, tentar busca por cada palavra individualmente (primeira palavra com mais de 3 letras):
-
-```typescript
-// Fallback: tenta match por primeira palavra significativa
-if (!matchingTasks?.length) {
-  const words = fnArgs.task_title.split(' ').filter(w => w.length > 3)
-  if (words.length > 0) {
-    const { data: fallbackTasks } = await supabase
-      .from('tasks')
-      .select('id, title')
-      .eq('workspace_id', workspace_id)
-      .ilike('title', `%${words[0]}%`)
-      .limit(1)
-    // use fallbackTasks if found
-  }
-}
-```
+**`src/App.tsx`** (MOD — simplified, reads from route-config)
 
 ---
 
-### Resumo dos arquivos
+## Sprint 2 — Dashboard decomposition
+
+Extract Dashboard's 636 lines into focused pieces:
+
+**`src/features/dashboard/hooks/useDashboardMetrics.ts`** (NEW)
+All 5 metric queries (notes, tasks, reminders, messages, spend) + AI metrics in one hook. Returns `{ metrics, loading }`.
+
+**`src/features/dashboard/hooks/useDashboardCharts.ts`** (NEW)
+Notes 7-day chart + tasks-by-status queries.
+
+**`src/features/dashboard/hooks/useDashboardRealtime.ts`** (NEW)
+Supabase Realtime channel subscription + query invalidation.
+
+**`src/features/dashboard/components/MetricsGrid.tsx`** (NEW)
+Renders the 6 metric cards + AI card.
+
+**`src/features/dashboard/components/ChartsSection.tsx`** (NEW)
+LineChart + BarChart cards side by side.
+
+**`src/features/dashboard/components/RecentActivity.tsx`** (NEW)
+Recent notes list + recent tasks list in grid.
+
+**`src/pages/app/Dashboard.tsx`** (MOD — becomes ~80 lines, composes the above)
+
+---
+
+## Sprint 3 — AI Chat decomposition (biggest gain)
+
+Extract AIChat's 1234 lines into:
+
+**`src/features/ai-chat/lib/parse-actions.ts`** (NEW)
+`parseActionsFromText()` function extracted.
+
+**`src/features/ai-chat/lib/stream-chat.ts`** (NEW)
+`streamAIChat()` function extracted.
+
+**`src/features/ai-chat/lib/export-markdown.ts`** (NEW)
+`exportConversationMD()` function extracted.
+
+**`src/features/ai-chat/services/action-executor.ts`** (NEW)
+`executeActions()` with Supabase inserts for task/note/reminder. Cleanly separated from UI.
+
+**`src/features/ai-chat/components/MarkdownRenderer.tsx`** (NEW)
+The `renderContent()` function becomes a standalone component. Accepts `content: string`, renders headings/code/lists/blockquotes.
+
+**`src/features/ai-chat/components/MessageBubble.tsx`** (NEW)
+`MessageBubble` component extracted. Uses MarkdownRenderer internally. Contains CopyButton, TTSButton, ActionBadge.
+
+**`src/features/ai-chat/components/ConversationSidebar.tsx`** (NEW)
+Left panel: conversation list, search input, proactive mode toggle, new chat button. Receives props from parent.
+
+**`src/features/ai-chat/components/ChatComposer.tsx`** (NEW)
+Bottom input: Textarea + mic button + send/stop button + disclaimer text.
+
+**`src/features/ai-chat/hooks/useAIChat.ts`** (NEW)
+All chat state: `input`, `isStreaming`, `chatMessages`, `handleSend`, `handleRegenerate`, `handleStop`, `handleExportMD`. Uses stream-chat lib and action-executor service.
+
+**`src/features/ai-chat/hooks/useVoiceInput.ts`** (NEW)
+`toggleListening`, `isListening` state, Web Speech API setup/teardown.
+
+**`src/features/ai-chat/hooks/useProactiveMode.ts`** (NEW)
+`proactiveMode` state (persisted in localStorage), `sessionStorage` guard, Supabase query + auto-trigger logic.
+
+**`src/pages/app/AIChat.tsx`** (MOD — becomes ~120 lines, composes everything)
+
+---
+
+## Sprint 4 — Mobile responsiveness for AI Chat
+
+The AI Chat sidebar (conversation list) is invisible on mobile (`w-0`). Fix:
+
+**`src/features/ai-chat/components/ConversationSidebar.tsx`** — on mobile, sidebar becomes a `Sheet` (bottom drawer) triggered by a button. Desktop keeps existing panel behavior.
+
+**`src/pages/app/AIChat.tsx`** — on mobile: `sidebarOpen` state drives a Sheet instead of a side panel. Chat area is full-width on mobile.
+
+Dashboard grid: already has `grid-cols-2` responsive. Add `grid-cols-1 sm:grid-cols-2 xl:grid-cols-6` for better mobile stacking.
+
+---
+
+## What I will NOT do
+
+- Full feature folder for all 11 pages — risk of broken imports with no visible benefit
+- Notion slash commands, PWA, Framer Motion — not requested functionality
+- New DB tables for "personal memory" — requires design decisions + migrations
+- Rewrite auth context, Supabase client — auto-generated / working fine
+- Move `shared/`, `types/`, `hooks/` root folders — working, no gain
+
+---
+
+## Files summary
 
 ```
-MOD  supabase/functions/process-message/index.ts
-  A — system prompt: nova seção "## Exclusão de Itens" com exemplos de palavras
-  B — handler delete_task: quando não encontra, lista tarefas disponíveis
-  C — handler delete_note: quando não encontra, lista notas recentes  
-  D — system prompt: instrução "excluir lembrete = cancel_reminder"
-  E — handlers delete_task + delete_note: fallback de busca por palavra individual
+NEW  src/app/providers/AppProviders.tsx
+NEW  src/app/router/route-config.ts
+MOD  src/App.tsx
+
+NEW  src/features/dashboard/hooks/useDashboardMetrics.ts
+NEW  src/features/dashboard/hooks/useDashboardCharts.ts
+NEW  src/features/dashboard/hooks/useDashboardRealtime.ts
+NEW  src/features/dashboard/components/MetricsGrid.tsx
+NEW  src/features/dashboard/components/ChartsSection.tsx
+NEW  src/features/dashboard/components/RecentActivity.tsx
+MOD  src/pages/app/Dashboard.tsx  (636 → ~80 lines)
+
+NEW  src/features/ai-chat/lib/parse-actions.ts
+NEW  src/features/ai-chat/lib/stream-chat.ts
+NEW  src/features/ai-chat/lib/export-markdown.ts
+NEW  src/features/ai-chat/services/action-executor.ts
+NEW  src/features/ai-chat/components/MarkdownRenderer.tsx
+NEW  src/features/ai-chat/components/MessageBubble.tsx
+NEW  src/features/ai-chat/components/ConversationSidebar.tsx
+NEW  src/features/ai-chat/components/ChatComposer.tsx
+NEW  src/features/ai-chat/hooks/useAIChat.ts
+NEW  src/features/ai-chat/hooks/useVoiceInput.ts
+NEW  src/features/ai-chat/hooks/useProactiveMode.ts
+MOD  src/pages/app/AIChat.tsx  (1234 → ~120 lines)
 ```
 
-Sem mudanças de banco de dados. Sem novas edge functions. Deploy automático após a edição.
+**Total: 18 new files, 3 modified. No DB migrations. No new packages.**
+
+Every new file is an extraction of existing, working code — not a rewrite. The app continues to function identically while becoming dramatically more maintainable.
