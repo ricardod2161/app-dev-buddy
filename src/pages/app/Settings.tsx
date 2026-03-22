@@ -77,6 +77,9 @@ const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [tzSearch, setTzSearch] = useState('')
   const [isDirty, setIsDirty] = useState(false)
+  const [editingMeta, setEditingMeta] = useState(false)
+  const [metaDiariaInput, setMetaDiariaInput] = useState('40')
+  const [savingMemory, setSavingMemory] = useState(false)
 
   const markDirty = React.useCallback(() => setIsDirty(true), [])
 
