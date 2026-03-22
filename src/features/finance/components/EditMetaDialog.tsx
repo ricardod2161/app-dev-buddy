@@ -50,6 +50,9 @@ export const EditMetaDialog: React.FC<EditMetaDialogProps> = ({
             <TrendingUp className="w-4 h-4 text-primary" />
             Editar Meta Financeira
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Defina a meta diária de poupança. Os valores mensais e anuais são calculados automaticamente.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
