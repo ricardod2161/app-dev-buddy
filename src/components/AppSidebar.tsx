@@ -32,6 +32,7 @@ const navGroups: NavGroup[] = [
       { label: 'Lembretes', path: '/app/reminders', icon: Bell },
       { label: 'Chat IA', path: '/app/ai-chat', icon: Sparkles },
       { label: 'Minhas Finanças', path: '/app/finance', icon: Wallet },
+      { label: 'Histórico Financeiro', path: '/app/finance/history', icon: TrendingUp },
     ],
   },
   {
