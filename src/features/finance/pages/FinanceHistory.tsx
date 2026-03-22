@@ -29,21 +29,24 @@ interface TooltipProps {
   diasNoMes?: number
 }
 
-const CustomTooltip: React.FC<TooltipProps> = ({ active, payload, label, metaDiaria = 40, diasNoMes = 30 }) => {
-  if (!active || !payload?.length) return null
-  const value = payload[0].value
-  const metaMensal = metaDiaria * diasNoMes
-  const pct = metaMensal > 0 ? Math.min(100, (value / metaMensal) * 100) : 0
-  return (
-    <div className="rounded-lg border bg-popover p-3 shadow-md text-sm space-y-1">
-      <p className="font-semibold text-foreground">{label}</p>
-      <p className="text-primary font-mono">{formatBRL(value)}</p>
-      <p className="text-muted-foreground text-xs">
-        ≈ {pct.toFixed(0)}% da meta mensal ({formatBRL(metaMensal)})
-      </p>
-    </div>
-  )
-}
+const CustomTooltip = React.forwardRef<HTMLDivElement, TooltipProps>(
+  ({ active, payload, label, metaDiaria = 40, diasNoMes = 30 }, ref) => {
+    if (!active || !payload?.length) return null
+    const value = payload[0].value
+    const metaMensal = metaDiaria * diasNoMes
+    const pct = metaMensal > 0 ? Math.min(100, (value / metaMensal) * 100) : 0
+    return (
+      <div ref={ref} className="rounded-lg border bg-popover p-3 shadow-md text-sm space-y-1">
+        <p className="font-semibold text-foreground">{label}</p>
+        <p className="text-primary font-mono">{formatBRL(value)}</p>
+        <p className="text-muted-foreground text-xs">
+          ≈ {pct.toFixed(0)}% da meta mensal ({formatBRL(metaMensal)})
+        </p>
+      </div>
+    )
+  }
+)
+CustomTooltip.displayName = 'CustomTooltip'
 
 const statusIcon = (total: number, cumprida: boolean) => {
   if (total === 0) return <span title="Sem registro">🔴</span>
