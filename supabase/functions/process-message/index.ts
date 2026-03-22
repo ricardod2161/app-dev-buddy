@@ -1113,7 +1113,8 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             replyText = fnArgs.reply_message ?? `✅ Nota financeira criada: ${fnArgs.title}`
           }
         } else {
-        replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
+          replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
+        }
       }
     } else if (fnName === 'update_note') {
       // Find note by fuzzy title match
