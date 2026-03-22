@@ -442,6 +442,19 @@ Deno.serve(async (req) => {
       ? `\n💰 Gastos registrados hoje (${todayShort}): ${formatCurrency(todaySpendTotal)}`
       : ''
 
+    // Build memory context block from persistent user_memory
+    const memoryBlock = userMemory
+      ? (() => {
+          const mesNome = new Date().toLocaleDateString('pt-BR', { timeZone: tz, month: 'long', year: 'numeric' })
+          const ultimaReservaStr = userMemory.ultima_reserva_data
+            ? new Date(userMemory.ultima_reserva_data).toLocaleDateString('pt-BR', { timeZone: tz, day: '2-digit', month: '2-digit' })
+            : 'nenhuma ainda'
+          const totalFmt = Number(userMemory.total_guardado_mes ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          const metaFmt = Number(userMemory.meta_diaria ?? 40).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          return `\n\n## 🧠 MEMÓRIA FINANCEIRA PERSISTENTE (valores reais do banco):\n- Meta diária: ${metaFmt}\n- Total guardado este mês (${mesNome}): ${totalFmt}\n- Última reserva: ${ultimaReservaStr}${userMemory.ultima_reserva_valor ? ` — ${Number(userMemory.ultima_reserva_valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : ''}\n- OBRIGATÓRIO: use esses valores reais ao responder. NUNCA invente totais.`
+        })()
+      : '\n\n## 🧠 MEMÓRIA FINANCEIRA:\n- Meta diária: R$ 40,00\n- Total guardado este mês: R$ 0,00 (sem registros ainda)'
+
     const contactContext = contactName
       ? `\n## Usuário\nO usuário se chama **${contactName}**.${contactNotes ? ` Observações: ${contactNotes}` : ''} Use o nome dele nas respostas de forma natural.`
       : ''
