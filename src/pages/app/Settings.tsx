@@ -47,6 +47,20 @@ const SettingsPage: React.FC = () => {
     enabled: !!workspaceId,
   })
 
+  const { data: userMemory, refetch: refetchMemory } = useQuery({
+    queryKey: ['user-memory', workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return null
+      const { data } = await supabase
+        .from('user_memory')
+        .select('id, meta_diaria, total_guardado_mes, ultima_reserva_data, ultima_reserva_valor, mes_referencia')
+        .eq('workspace_id', workspaceId)
+        .maybeSingle()
+      return data
+    },
+    enabled: !!workspaceId,
+  })
+
   const [categories, setCategories] = useState<string[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [botFormat, setBotFormat] = useState<WorkspaceSettings['bot_response_format']>('medio')
