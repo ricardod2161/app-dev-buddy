@@ -222,6 +222,9 @@ Use "**Raciocínio:**" para mostrar seu processo de pensamento antes da resposta
           model: selectedModel,
           messages: finalMessages,
           stream: true,
+          temperature: 0.3,
+          top_p: 0.85,
+          max_tokens: 1200,
         }),
       }
     );
