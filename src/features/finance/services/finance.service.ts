@@ -106,3 +106,45 @@ export async function upsertFinanceMemory(
     )
   if (error) throw error
 }
+
+/**
+ * Returns monthly totals for the last N months, derived from notes.
+ */
+export async function getHistoricoMensal(workspaceId: string, months = 12): Promise<MesHistorico[]> {
+  const now = new Date()
+  // Start of earliest month we want
+  const start = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select('content, title, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('category', 'Financeiro')
+    .gte('created_at', start.toISOString())
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+
+  // Group by YYYY-MM
+  const byMonth: Record<string, number> = {}
+  for (const note of data ?? []) {
+    const d = new Date(note.created_at!)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const valor = parseMonetaryValue(note.content ?? note.title ?? '') ?? 0
+    byMonth[key] = (byMonth[key] ?? 0) + valor
+  }
+
+  const META_MENSAL = 40 * 30
+
+  // Build ordered array for the last N months
+  const result: MesHistorico[] = []
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const total = byMonth[mes] ?? 0
+    const meses_pt = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+    const mesLabel = `${meses_pt[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`
+    result.push({ mes, mesLabel, total, meta: META_MENSAL, cumprida: total >= META_MENSAL })
+  }
+  return result
+}
