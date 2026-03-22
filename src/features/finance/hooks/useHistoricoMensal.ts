@@ -1,13 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { getHistoricoMensal } from '../services/finance.service'
+import type { MesHistorico } from '../types/transaction.types'
 
-export interface MesHistorico {
-  mes: string        // 'YYYY-MM'
-  mesLabel: string   // 'Mar/26'
-  total: number
-  meta: number
-  cumprida: boolean
-}
+export type { MesHistorico }
 
 export function useHistoricoMensal(workspaceId: string | null) {
   return useQuery({
