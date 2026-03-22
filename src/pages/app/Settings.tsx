@@ -152,6 +152,42 @@ const SettingsPage: React.FC = () => {
     }
   }
 
+  const saveMemory = async (newMeta?: number) => {
+    if (!workspaceId) return
+    setSavingMemory(true)
+    try {
+      const payload = { meta_diaria: newMeta ?? Number(metaDiariaInput) || 40 }
+      if (userMemory?.id) {
+        await supabase.from('user_memory').update(payload).eq('workspace_id', workspaceId)
+      } else {
+        await supabase.from('user_memory').insert({ workspace_id: workspaceId, ...payload })
+      }
+      toast.success('Meta diária salva!')
+      refetchMemory()
+      setEditingMeta(false)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao salvar')
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
+  const resetMonthlyTotal = async () => {
+    if (!workspaceId) return
+    setSavingMemory(true)
+    try {
+      await supabase
+        .from('user_memory')
+        .upsert({ workspace_id: workspaceId, total_guardado_mes: 0, mes_referencia: new Date().toISOString().slice(0, 7) }, { onConflict: 'workspace_id' })
+      toast.success('Total do mês resetado para R$ 0,00')
+      refetchMemory()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao resetar')
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
   if (isLoading) return (
     <div className="space-y-4 max-w-2xl">
       {[...Array(4)].map((_, i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />)}
@@ -168,12 +204,18 @@ const SettingsPage: React.FC = () => {
     if (v && !tags.includes(v)) { setTags(prev => [...prev, v]); setNewTag('') }
   }
 
+  const memTotalFmt = Number(userMemory?.total_guardado_mes ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const memMetaFmt = Number(userMemory?.meta_diaria ?? 40).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const memUltimaReserva = userMemory?.ultima_reserva_data
+    ? new Date(userMemory.ultima_reserva_data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    : '—'
+
   return (
     <div className="space-y-6 max-w-2xl animate-slide-up">
       {/* Unsaved changes banner */}
       {isDirty && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 border border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-700">
-          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">⚠️ Você tem alterações não salvas</span>
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-warning/10 border border-warning/30">
+          <span className="text-sm font-medium text-warning-foreground">⚠️ Você tem alterações não salvas</span>
         </div>
       )}
       {/* Nome do assistente */}
