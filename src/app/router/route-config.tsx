@@ -81,4 +81,9 @@ export const appRoutes: AppRoute[] = [
     title: 'Chat IA',
     element: <ErrorBoundary fallbackTitle="Erro no Chat IA"><AIChatPage /></ErrorBoundary>,
   },
+  {
+    path: '/app/finance',
+    title: 'Minhas Finanças',
+    element: <ErrorBoundary fallbackTitle="Erro nas Finanças"><FinanceDashboard /></ErrorBoundary>,
+  },
 ]
