@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, RefreshCw, BarChart2, Sparkles, CheckCircle2 } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2 } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservaParser } from '../hooks/useReservaParser'
@@ -31,10 +31,16 @@ const FinanceDashboard: React.FC = () => {
 
   const { reservas, totalReservas } = useReservaParser(gastosMes)
   const metaDiaria = totalData?.memory?.meta_diaria ?? 40
-  const totalGuardado = totalData?.memory?.total_guardado_mes ?? 0
+
+  // Derive total guardado from real-time notes (reservas) instead of stale user_memory
+  // Fall back to user_memory only if no reservas found in current month's notes
+  const totalGuardadoFromNotes = totalReservas
+  const totalGuardadoFromMemory = totalData?.memory?.total_guardado_mes ?? 0
+  const totalGuardado = totalGuardadoFromNotes > 0 ? totalGuardadoFromNotes : totalGuardadoFromMemory
+
   const mesAtual = monthLabel(totalData?.memory?.mes_referencia)
   const metaMensal = totalData?.meta_mensal ?? metaDiaria * 30
-  const progresso = totalData?.progresso_pct ?? 0
+  const progresso = metaMensal > 0 ? Math.min(100, (totalGuardado / metaMensal) * 100) : 0
   const metaDiariaCumprida = totalGuardado >= metaDiaria
   const totalHoje = gastosHoje.reduce((s, g) => s + g.valor, 0)
 
@@ -107,8 +113,8 @@ const FinanceDashboard: React.FC = () => {
               <BarChart2 className="w-4 h-4" />
             </Link>
           </Button>
-          <Button variant="ghost" size="icon" onClick={invalidateAll} className="h-8 w-8">
-            <RefreshCw className="w-4 h-4" />
+          <Button variant="ghost" size="icon" onClick={invalidateAll} className="h-8 w-8" title="Atualizar dados">
+            <RotateCcw className="w-4 h-4" />
           </Button>
         </div>
       </div>

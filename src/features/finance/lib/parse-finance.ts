@@ -77,6 +77,9 @@ export function parseMonetaryValue(text: string): number | null {
 export function parseReservaTotalFromContent(content: string): number {
   if (!content) return 0
 
+  // Skip lines that are summary/total/meta lines — they double-count the actual values
+  const SUMMARY_KEYWORDS = /\b(total|totalizando|totalizar|meta|progresso|acumulado|guardado\s+este\s+mês)\b/i
+
   const lines = content.split('\n')
   const seen = new Set<string>()
   let total = 0
@@ -84,6 +87,9 @@ export function parseReservaTotalFromContent(content: string): number {
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
+
+    // Skip summary/confirmation lines that repeat an already-counted value
+    if (SUMMARY_KEYWORDS.test(trimmed)) continue
 
     // Deduplicate identical lines (AI bug: same bullet repeated 10×)
     if (seen.has(trimmed)) continue

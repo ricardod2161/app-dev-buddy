@@ -261,8 +261,6 @@ export async function getHistoricoMensal(workspaceId: string, months = 12): Prom
     byMonth[key] = (byMonth[key] ?? 0) + valor
   }
 
-  const META_MENSAL = 40 * 30
-
   const meses_pt = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
   const result: MesHistorico[] = []
   for (let i = months - 1; i >= 0; i--) {
@@ -270,6 +268,9 @@ export async function getHistoricoMensal(workspaceId: string, months = 12): Prom
     const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const total = byMonth[mes] ?? 0
     const mesLabel = `${meses_pt[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`
+    // Use actual days in each specific month for accurate goal calculation
+    const daysInThisMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    const META_MENSAL = 40 * daysInThisMonth
     result.push({ mes, mesLabel, total, meta: META_MENSAL, cumprida: total >= META_MENSAL })
   }
   return result
