@@ -1,107 +1,74 @@
+## Diagnóstico completo — causa raiz dos R$ 3.565,51 incorretos
 
-## What the user wants
+Dados reais no banco para Março/2026:
 
-1. **New page `/app/finance/history`** — bar chart showing monthly totals over time vs. annual goal (R$ 40 × 365 = R$ 14,600)
-2. **Reorganize FinanceDashboard** — currently "mau organizado" (poorly organized): cards feel disconnected, report and list sections overlap in purpose, no navigation to history
+- Apenas **2 notas de reserva**: 22/03 (R$ 40,00) e 16/03 (R$ 40,00 × 10 linhas duplicadas)
+- **Real guardado**: R$ 40 + R$ 40 = **R$ 80,00**
 
-## Data strategy for history
+### Bug 1 (principal): `getHistoricoMensal` soma TUDO
 
-There is no `user_memory_history` table yet. We'll derive monthly history from the existing `notes` table: group `notes` by month where `category = 'Financeiro'`, summing values per month. This gives real data without a migration.
+Em `finance.service.ts`, linha 129-133, o loop pega **todas** as notas `category='Financeiro'` e soma os valores — gastos, recebimentos, fretes, reservas, dívidas — sem filtrar por tipo. Isso inclui:
 
-New service function: `getHistoricoMensal(workspaceId, months=12)` — queries notes grouped by `YYYY-MM` for the past N months.
+- Gasto Moto R$ 100
+- Dívida Yuri R$ 30 + R$ 17 + R$ 30 × 3
+- Gasto R$ 260,51 (Agência de Fomento)
+- Fralda R$ 240
+- Recebimentos R$ 250, R$ 340, R$ 200, etc.
 
-New hook: `useHistoricoMensal(workspaceId)` — wraps the service with React Query.
+**Correção**: filtrar apenas notas onde `title ILIKE '%reserva%' OR content ILIKE '%reserva%'`.
 
-## Files
+### Bug 2 (secundário): nota 16/03 tem "Reserva Adicional" repetida 10x
 
-### New files
+O content da nota `dc18684d` tem `• Reserva: R$ 40,00` + `• Reserva Adicional: R$ 40,00` × 9 linhas. `parseMonetaryValue` pega só o primeiro valor (R$ 40), então esse bug é menos grave — mas a nota representa 1 reserva de R$ 40, não 10. Isso provavelmente foi criado pelo AI duplicando o registro. A correção do Bug 1 já resolve a exibição.
+
+### Bug 3 (parser): `useTotalGuardado` usa `user_memory.total_guardado_mes`
+
+Esse campo pode estar correto (atualizado pelo edge function) ou pode ter sido inflado pelas mesmas duplicações. Deve mostrar o valor real do banco.
+
+---
+
+## O que será corrigido
+
+### `finance.service.ts` — `getHistoricoMensal`
+
+Adicionar filtro reserva-only: `ilike('title', '%reserva%')` OR filtrar no JS após busca (mais seguro pois o OR no Supabase precisa de `.or()`).
+
+Estratégia: buscar com `.or('title.ilike.%reserva%,content.ilike.%reserva%')` — assim só notas de reserva entram no cálculo de "guardado".
+
+```typescript
+// ANTES: busca tudo
+.eq('category', 'Financeiro')
+
+// DEPOIS: só reservas
+.eq('category', 'Financeiro')
+.or('title.ilike.%reserva%,content.ilike.%reserva%')
 ```
-NEW  src/features/finance/pages/FinanceHistory.tsx
-       — Page at /app/finance/history
-       — Bar chart (recharts BarChart — already in project)
-       — Annual goal progress: total acumulado vs R$14.600
-       — Month-by-month table below chart
 
-NEW  src/features/finance/hooks/useHistoricoMensal.ts
-       — React Query hook fetching last 12 months from notes
-```
+### `finance.service.ts` — `getGastosMes` (para total guardado no dashboard)
 
-### Modified files
+A função `getGastosMes` já classifica corretamente via `noteToGasto` + `isReserva`, então os hooks que dependem dela (`useTotalGuardado` usando `user_memory`, `WhatsAppStyleReport`) já filtram certo no display. O problema é só no histórico.
+
+### `FinanceHistory.tsx` — adicionar nota explicativa
+
+Mostrar claramente: "Mostrando apenas entradas de reserva (poupança). Gastos e recebimentos aparecem em Minhas Finanças."
+
+---
+
+## Arquivos
+
 ```
 MOD  src/features/finance/services/finance.service.ts
-       — Add getHistoricoMensal() — queries notes grouped by month
+       — getHistoricoMensal: adicionar .or('title.ilike.%reserva%,content.ilike.%reserva%')
+       — getGastosHoje/getGastosMes: sem mudança (já filtram por tipo depois)
 
-MOD  src/features/finance/pages/FinanceDashboard.tsx
-       — Reorganize layout:
-         Row 1: 3 metric cards (total guardado | só reservas | hoje) — cleaner
-         Row 2: MetaDiariaProgress card (full width)
-         Row 3: Quick actions row — "Ver Histórico" link button
-         Row 4: Tabs (Hoje / Este mês / Reservas) — WhatsAppStyleReport
-         Row 5: Detailed list (collapsed/accordion on mobile)
-
-MOD  src/app/router/route-config.tsx
-       — Add route /app/finance/history → FinanceHistory
-
-MOD  src/components/AppSidebar.tsx
-       — Add "Histórico" sub-item under "Minhas Finanças" (or keep flat with History link inside Dashboard)
-       — Simpler: add History as separate sidebar item in the finance group
+MOD  src/features/finance/pages/FinanceHistory.tsx
+       — Adicionar badge/nota explicativa: "Só reservas contabilizadas"
+       — Mostrar total real (com o fix, deve exibir R$ 80,00 para Mar/26)
 ```
 
-## FinanceDashboard reorganization specifics
+Sem migrations. Apenas 2 arquivos. Fix cirúrgico.
 
-Current problems:
-- "Relatório WhatsApp" card + "Lançamentos do mês" card both show the same data in slightly different styles — redundant
-- No link/navigation to history
-- Cards feel cramped on the current 715px viewport
+### Resultado esperado após o fix
 
-New layout:
-```
-┌─────────────────────────────────────────┐
-│ Header: Minhas Finanças          [↻][📊] │ ← add History button
-├──────────┬──────────┬────────────────────┤
-│ Guardado │ Reservas │  Hoje              │
-├──────────┴──────────┴────────────────────┤
-│ Progresso da meta ████████░░ 67%         │
-├─────────────────────────────────────────┤
-│ [Hoje] [Este mês] [Só Reservas]          │
-│ • Gasto com Reserva (22/03) — R$ 40,00  │
-│ Total: R$ 40,00                          │
-│ [Ver lista completa ↓]                   │  ← collapsible
-└─────────────────────────────────────────┘
-```
-
-Remove the separate "Lançamentos do mês" card (it was duplicating the "Este mês" tab). The tabs now handle all three modes with a "Ver mais" toggle to show full list.
-
-## FinanceHistory page
-
-```
-┌─────────────────────────────────────────┐
-│ ← Minhas Finanças  | Histórico Anual    │
-├─────────────────────────────────────────┤
-│ META ANUAL: R$ 14.600  ████░░░░░ 23%    │
-│ Total acumulado: R$ 3.360               │
-├─────────────────────────────────────────┤
-│ [Bar Chart — 12 months]                 │
-│  Jan  Fev  Mar  Abr ... Dez             │
-│  ██   ██   ██                           │
-│  linha pontilhada = meta mensal         │
-├─────────────────────────────────────────┤
-│ Tabela: Mês | Guardado | Meta | Status  │
-│ Mar/26 | R$40 | R$1.240 | ⏳            │
-│ Fev/26 | R$0  | R$1.120 | 🔴            │
-└─────────────────────────────────────────┘
-```
-
-Uses `recharts` `BarChart` + `ReferenceLine` for the monthly target line. Already bundled in the project (used in Dashboard charts).
-
-## Total files
-```
-NEW  src/features/finance/pages/FinanceHistory.tsx
-NEW  src/features/finance/hooks/useHistoricoMensal.ts
-MOD  src/features/finance/services/finance.service.ts  (+getHistoricoMensal)
-MOD  src/features/finance/pages/FinanceDashboard.tsx   (layout reorganization)
-MOD  src/app/router/route-config.tsx                   (+/app/finance/history)
-MOD  src/components/AppSidebar.tsx                     (+Histórico link)
-```
-
-No migrations. No new packages. Uses recharts already in project.
+- Mar/26: R$ 80,00 (R$ 40 dia 22 + R$ 40 dia 16) ✅
+- Meta anual: 80 / 14.600 = **0,5%** — número honesto e real, ainda esta mostrando e somando errado , comecei a guardar dia 16 ate hoje dia 22 era pra ter 280 guandado, entao ajuste tudo e faç melhorias e inteligência.
