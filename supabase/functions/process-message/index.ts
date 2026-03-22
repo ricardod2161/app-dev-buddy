@@ -926,6 +926,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             messages: aiMessages,
             tools: toolDefinitions,
             tool_choice: 'required',
+            temperature: 0.3,
+            top_p: 0.85,
+            max_tokens: 1200,
           }),
         })
 
