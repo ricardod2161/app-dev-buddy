@@ -306,6 +306,14 @@ const FinanceDashboard: React.FC = () => {
         diasNoMes={diasNoMes}
         onSave={handleSaveMeta}
       />
+
+      {/* ── Manual Reserva Dialog ── */}
+      <ManualReservaDialog
+        open={manualReserva}
+        onOpenChange={setManualReserva}
+        metaDiaria={metaDiaria}
+        onSave={handleManualReserva}
+      />
     </div>
   )
 }
