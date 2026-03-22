@@ -510,6 +510,24 @@ const NotesPage: React.FC = () => {
     if (searchParams.get('new') === '1') setNewNoteOpen(true)
   }, [searchParams])
 
+  // ── Realtime: novas notas do bot aparecem automaticamente ──
+  useEffect(() => {
+    if (!workspaceId) return
+    const channel = supabase
+      .channel(`notes-realtime-${workspaceId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notes', filter: `workspace_id=eq.${workspaceId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['notes', workspaceId] })
+          qc.invalidateQueries({ queryKey: ['dashboard-notes-today', workspaceId] })
+          qc.invalidateQueries({ queryKey: ['dashboard-recent-notes', workspaceId] })
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [workspaceId, qc])
+
   const { data: settings } = useQuery({
     queryKey: ['workspace-settings', workspaceId],
     queryFn: async () => {

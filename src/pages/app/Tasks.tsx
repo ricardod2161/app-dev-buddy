@@ -333,8 +333,22 @@ const TasksPage: React.FC = () => {
       }).eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', workspaceId] }),
-    onError: (e: Error) => toast.error(e.message),
+    onMutate: async ({ id, status }) => {
+      await qc.cancelQueries({ queryKey: ['tasks', workspaceId] })
+      const snapshot = qc.getQueryData<Task[]>(['tasks', workspaceId])
+      qc.setQueryData<Task[]>(['tasks', workspaceId], old =>
+        old?.map(t => t.id === id
+          ? { ...t, status, completed_at: status === 'done' ? new Date().toISOString() : null }
+          : t
+        ) ?? []
+      )
+      return { snapshot }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.snapshot) qc.setQueryData(['tasks', workspaceId], ctx.snapshot)
+      toast.error('Erro ao mover tarefa — revertido')
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['tasks', workspaceId] }),
   })
 
   const deleteMutation = useMutation({
