@@ -1,10 +1,7 @@
-const MONETARY_PATTERNS = [
-  // R$ 1.200,50 or R$1200,50
-  /R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})/gi,
-  // R$ 1200.50 (US style)
-  /R\$\s*(\d+\.\d{2})\b/gi,
-  // R$ 40 (plain integer)
-  /R\$\s*(\d+(?:,\d+)?)/gi,
+const MONETARY_PATTERNS_GLOBAL = [
+  /R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})/g,
+  /R\$\s*(\d+\.\d{2})\b/g,
+  /R\$\s*(\d+(?:,\d+)?)/g,
 ]
 
 function parseSingleValue(raw: string): number | null {
@@ -16,16 +13,33 @@ function parseSingleValue(raw: string): number | null {
 }
 
 /**
- * Parses the FIRST monetary value from free text.
+ * Extracts the FIRST declared monetary value from a line of text.
+ * Stops before any parenthetical clause containing "totalizar" or "total".
+ * e.g. "Ajuste: R$ 120,00 (Para totalizar R$ 240,00)" → 120
+ */
+function parseFirstValueFromLine(line: string): number | null {
+  // Trim anything in parentheses that contains "totalizar"/"total" — it's explanatory
+  const stripped = line.replace(/\([^)]*(?:totalizar|total\b)[^)]*\)/gi, '').trim()
+  if (!stripped) return null
+
+  for (const re of MONETARY_PATTERNS_GLOBAL) {
+    const pattern = new RegExp(re.source, re.flags)
+    const match = pattern.exec(stripped)
+    if (match) return parseSingleValue(match[1])
+  }
+  return null
+}
+
+/**
+ * Parses monetary values from free text — returns only the FIRST value found.
  * Handles: "R$ 40", "R$40,00", "40 reais", "E os 40?", "1.200,00"
  */
 export function parseMonetaryValue(text: string): number | null {
   if (!text) return null
 
-  // Try R$ prefixed patterns first
-  for (const re of MONETARY_PATTERNS) {
-    re.lastIndex = 0
-    const match = re.exec(text)
+  for (const re of MONETARY_PATTERNS_GLOBAL) {
+    const pattern = new RegExp(re.source, re.flags)
+    const match = pattern.exec(text)
     if (match) return parseSingleValue(match[1])
   }
 
@@ -46,14 +60,19 @@ export function parseMonetaryValue(text: string): number | null {
 }
 
 /**
- * Parses ALL monetary values from a multi-line reserva note,
- * deduplicating identical consecutive bullet lines (AI duplication bug).
+ * Parses and sums ALL monetary values from a multi-line reserva note,
+ * deduplicating identical consecutive bullet lines (handles AI duplication bugs).
  *
- * Strategy:
- * 1. Split content into lines
- * 2. Deduplicate: skip a line if it's identical (trimmed) to the previous
- * 3. Extract R$ value from each unique line
- * 4. Sum them all — this handles "Reserva: R$40 + Ajuste: R$120 = R$160"
+ * Rules:
+ * 1. Split into lines, deduplicate identical trimmed lines
+ * 2. Per line: extract first R$ value, ignoring parenthetical "totalizar" clauses
+ * 3. Sum all extracted values
+ *
+ * Example:
+ *   "• Reserva Diária: R$ 40,00"                              → +40
+ *   "• Ajuste: R$ 120,00 (Para totalizar R$ 240,00 conforme)" → +120  (skip parenthetical)
+ *   "• Reserva: R$ 40,00" × 10 duplicates                    → +40 once (dedup)
+ *   "• Reserva Adicional: R$ 40,00" × 9 duplicates           → +40 once (dedup)
  */
 export function parseReservaTotalFromContent(content: string): number {
   if (!content) return 0
@@ -66,14 +85,11 @@ export function parseReservaTotalFromContent(content: string): number {
     const trimmed = line.trim()
     if (!trimmed) continue
 
-    // Deduplicate identical lines (AI bug: "Reserva Adicional: R$ 40" × 10)
+    // Deduplicate identical lines (AI bug: same bullet repeated 10×)
     if (seen.has(trimmed)) continue
     seen.add(trimmed)
 
-    // Skip lines with "totalizar" — these are explanatory, not additive
-    if (/totalizar/i.test(trimmed)) continue
-
-    const val = parseMonetaryValue(trimmed)
+    const val = parseFirstValueFromLine(trimmed)
     if (val !== null) total += val
   }
 
