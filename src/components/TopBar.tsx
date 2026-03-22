@@ -15,21 +15,14 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useSidebarCtx } from '@/layouts/AppLayout'
 import { Badge } from '@/components/ui/badge'
+import { appRoutes } from '@/app/router/route-config'
 
-const pageTitles: Record<string, string> = {
-  '/app': 'Dashboard',
-  '/app/notes': 'Notas',
-  '/app/tasks': 'Tarefas',
-  '/app/reminders': 'Lembretes',
-  '/app/reports': 'Relatórios',
-  '/app/conversations': 'Conversas',
-  '/app/contacts': 'Contatos',
-  '/app/integrations': 'Integrações',
-  '/app/whitelist': 'Whitelist',
-  '/app/settings': 'Configurações',
-  '/app/logs': 'Logs de Webhook',
-  '/app/ai-chat': 'Chat IA — ZYNTRA',
-}
+// Build title map from the central route config — single source of truth
+const pageTitles: Record<string, string> = Object.fromEntries(
+  appRoutes.map(r => [r.path, r.title])
+)
+// Override AI Chat title to include branding
+pageTitles['/app/ai-chat'] = 'Chat IA — ZYNTRA'
 
 interface TopBarProps {
   onOpenSearch?: () => void
