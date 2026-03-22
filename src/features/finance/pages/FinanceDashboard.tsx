@@ -152,6 +152,15 @@ const FinanceDashboard: React.FC = () => {
               : <Calculator className="w-4 h-4" />
             }
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Registrar reservas de dias anteriores manualmente"
+            onClick={() => setManualReserva(true)}
+          >
+            <CalendarPlus className="w-4 h-4" />
+          </Button>
           <Button variant="ghost" size="icon" asChild className="h-8 w-8">
             <Link to="/app/finance/history">
               <BarChart2 className="w-4 h-4" />
