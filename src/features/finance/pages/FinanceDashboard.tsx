@@ -7,12 +7,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2, Calculator } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2, Calculator, CalendarPlus } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservasMensais } from '../hooks/useReservasMensais'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
 import { EditMetaDialog } from '../components/EditMetaDialog'
+import { ManualReservaDialog } from '../components/ManualReservaDialog'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
 import {
@@ -21,6 +22,7 @@ import {
   upsertFinanceMemory,
   type CleanupResult,
 } from '../services/finance.service'
+import { supabase } from '@/integrations/supabase/client'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
