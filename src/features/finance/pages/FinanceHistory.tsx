@@ -15,27 +15,42 @@ import {
 import { useHistoricoMensal } from '../hooks/useHistoricoMensal'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { formatBRL } from '../lib/parse-finance'
+import type { MesHistorico } from '../hooks/useHistoricoMensal'
 
 // R$ 40/dia × 365 dias
-const META_ANUAL = 40 * 365    // R$ 14.600
-const META_MENSAL = 40 * 30    // R$ 1.200 aprox
+const META_ANUAL = 40 * 365  // R$ 14.600
 
-const CustomTooltip = ({
-  active, payload, label,
-}: {
+/** Calculates actual days in a given YYYY-MM month key */
+function daysInMonth(mesKey: string): number {
+  const [year, month] = mesKey.split('-').map(Number)
+  return new Date(year!, month!, 0).getDate()
+}
+
+/** Returns the META_MENSAL for a given month key (R$ 40 × actual days) */
+function metaMensalForKey(mesKey: string): number {
+  return 40 * daysInMonth(mesKey)
+}
+
+interface TooltipProps {
   active?: boolean
   payload?: { value: number }[]
   label?: string
-}) => {
+  mesKey?: string
+}
+
+// Defined outside component, no forwardRef needed — recharts only needs a function component
+const CustomTooltip: React.FC<TooltipProps> = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
   const value = payload[0].value
-  const pct = META_MENSAL > 0 ? Math.min(100, (value / META_MENSAL) * 100) : 0
+  // We don't have mesKey here so use a neutral 30-day approximation for tooltip
+  const metaMensal = 40 * 30
+  const pct = metaMensal > 0 ? Math.min(100, (value / metaMensal) * 100) : 0
   return (
     <div className="rounded-lg border bg-popover p-3 shadow-md text-sm space-y-1">
       <p className="font-semibold text-foreground">{label}</p>
       <p className="text-primary font-mono">{formatBRL(value)}</p>
       <p className="text-muted-foreground text-xs">
-        Meta mensal: {formatBRL(META_MENSAL)} ({pct.toFixed(0)}%)
+        ≈ {pct.toFixed(0)}% da meta mensal
       </p>
     </div>
   )
@@ -60,7 +75,10 @@ const FinanceHistory: React.FC = () => {
 
   // Stats
   const mesesComDado = historico.filter(m => m.total > 0).length
-  const melhorMes = historico.reduce((best, m) => m.total > (best?.total ?? 0) ? m : best, null as typeof historico[0] | null)
+  const melhorMes = historico.reduce(
+    (best, m) => m.total > (best?.total ?? 0) ? m : best,
+    null as MesHistorico | null
+  )
 
   if (!workspaceId) {
     return (
@@ -70,6 +88,13 @@ const FinanceHistory: React.FC = () => {
         icon={TrendingUp}
       />
     )
+  }
+
+  // Bar color: primary for goal met, primary/50 for in-progress, muted for empty
+  const barColor = (entry: MesHistorico) => {
+    if (entry.total === 0) return 'hsl(var(--muted-foreground) / 0.2)'
+    if (entry.cumprida) return 'hsl(var(--primary))'
+    return 'hsl(var(--primary) / 0.45)'
   }
 
   return (
@@ -164,57 +189,67 @@ const FinanceHistory: React.FC = () => {
               </p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={historico} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
-                <XAxis
-                  dataKey="mesLabel"
-                  tick={{ fontSize: 11 }}
-                  className="fill-muted-foreground"
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  className="fill-muted-foreground"
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v: number) => `R$${v}`}
-                  width={56}
-                />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted) / 0.5)' }} />
-                <ReferenceLine
-                  y={META_MENSAL}
-                  stroke="hsl(var(--primary))"
-                  strokeDasharray="4 4"
-                  strokeOpacity={0.6}
-                  label={{
-                    value: 'Meta',
-                    position: 'right',
-                    fontSize: 10,
-                    fill: 'hsl(var(--primary))',
-                  }}
-                />
-                <Bar dataKey="total" radius={[4, 4, 0, 0]} maxBarSize={44}>
-                  {historico.map((entry, i) => (
-                    <Cell
-                      key={i}
-                      fill={
-                        entry.total === 0
-                          ? 'hsl(var(--muted-foreground) / 0.2)'
-                          : entry.cumprida
-                          ? 'hsl(var(--primary))'
-                          : 'hsl(var(--primary) / 0.5)'
-                      }
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={historico} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                  <XAxis
+                    dataKey="mesLabel"
+                    tick={{ fontSize: 11 }}
+                    className="fill-muted-foreground"
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    className="fill-muted-foreground"
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v: number) => `R$${v}`}
+                    width={56}
+                  />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted) / 0.5)' }} />
+                  {/* Reference line at approximate monthly goal — use current month's days */}
+                  <ReferenceLine
+                    y={metaMensalForKey(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`)}
+                    stroke="hsl(var(--primary))"
+                    strokeDasharray="4 4"
+                    strokeOpacity={0.6}
+                    label={{
+                      value: 'Meta',
+                      position: 'right',
+                      fontSize: 10,
+                      fill: 'hsl(var(--primary))',
+                    }}
+                  />
+                  <Bar dataKey="total" radius={[4, 4, 0, 0]} maxBarSize={44}>
+                    {historico.map((entry, i) => (
+                      <Cell key={i} fill={barColor(entry)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              {/* Legend matching actual bar colors */}
+              <div className="flex items-center justify-center gap-4 mt-2 text-[10px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(var(--primary))' }} />
+                  Meta cumprida
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(var(--primary) / 0.45)' }} />
+                  Em andamento
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded-sm bg-muted-foreground/20" />
+                  Sem registro
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-6 border-t-2 border-dashed border-primary/60" />
+                  Meta
+                </span>
+              </div>
+            </>
           )}
-          <p className="text-[10px] text-muted-foreground mt-2 text-center">
-            ✅ Meta cumprida · 🟣 Em andamento · ⬜ Sem registro · linha = meta mensal ({formatBRL(META_MENSAL)})
-          </p>
         </CardContent>
       </Card>
 
@@ -235,18 +270,23 @@ const FinanceHistory: React.FC = () => {
                   <tr className="border-b border-border">
                     <th className="text-left py-2 text-xs font-semibold text-muted-foreground">Mês</th>
                     <th className="text-right py-2 text-xs font-semibold text-muted-foreground">Guardado</th>
-                    <th className="text-right py-2 text-xs font-semibold text-muted-foreground">% da meta</th>
+                    <th className="text-right py-2 text-xs font-semibold text-muted-foreground">Meta</th>
+                    <th className="text-right py-2 text-xs font-semibold text-muted-foreground">% meta</th>
                     <th className="text-right py-2 text-xs font-semibold text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {[...historico].reverse().map((m) => {
-                    const pctMes = META_MENSAL > 0 ? Math.min(100, (m.total / META_MENSAL) * 100) : 0
+                    const meta = metaMensalForKey(m.mes)
+                    const pctMes = meta > 0 ? Math.min(100, (m.total / meta) * 100) : 0
                     return (
                       <tr key={m.mes} className="border-b border-border/50 last:border-0">
                         <td className="py-2 font-medium">{m.mesLabel}</td>
                         <td className={`py-2 text-right font-semibold font-mono ${m.total === 0 ? 'text-muted-foreground' : 'text-primary'}`}>
                           {m.total === 0 ? '—' : formatBRL(m.total)}
+                        </td>
+                        <td className="py-2 text-right text-muted-foreground text-xs font-mono">
+                          {formatBRL(meta)}
                         </td>
                         <td className="py-2 text-right text-muted-foreground text-xs">
                           {m.total === 0 ? '—' : `${pctMes.toFixed(1)}%`}
@@ -262,8 +302,11 @@ const FinanceHistory: React.FC = () => {
                   <tr className="border-t-2 border-border">
                     <td className="py-2 font-bold text-xs">TOTAL</td>
                     <td className="py-2 text-right font-bold text-primary font-mono">{formatBRL(totalAcumulado)}</td>
+                    <td className="py-2 text-right font-bold text-muted-foreground text-xs font-mono">
+                      {formatBRL(META_ANUAL)}
+                    </td>
                     <td className="py-2 text-right font-bold text-muted-foreground text-xs">
-                      {progressoAnual.toFixed(2)}% anual
+                      {progressoAnual.toFixed(2)}%
                     </td>
                     <td className="py-2 text-right">
                       {progressoAnual >= 100 ? '🏆' : totalAcumulado > 0 ? '📈' : '—'}

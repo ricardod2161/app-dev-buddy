@@ -113,8 +113,8 @@ const FinanceDashboard: React.FC = () => {
               <BarChart2 className="w-4 h-4" />
             </Link>
           </Button>
-          <Button variant="ghost" size="icon" onClick={invalidateAll} className="h-8 w-8">
-            <RefreshCw className="w-4 h-4" />
+          <Button variant="ghost" size="icon" onClick={invalidateAll} className="h-8 w-8" title="Atualizar dados">
+            <RotateCcw className="w-4 h-4" />
           </Button>
         </div>
       </div>

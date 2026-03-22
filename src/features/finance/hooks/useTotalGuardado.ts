@@ -17,10 +17,23 @@ export function useTotalGuardado(workspaceId: string | null): { data: TotalGuard
     staleTime: 30_000,
   })
 
-  if (!memory) return { data: null, isLoading }
-
   const now = new Date()
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+
+  // Return a valid default object even when memory row doesn't exist yet.
+  // This prevents the dashboard from showing infinite loading skeletons.
+  if (!memory) {
+    return {
+      data: {
+        memory: null,
+        progresso_pct: 0,
+        meta_mensal: 40 * daysInMonth,
+        dias_no_mes: daysInMonth,
+      },
+      isLoading,
+    }
+  }
+
   const meta_mensal = memory.meta_diaria * daysInMonth
   const progresso_pct = meta_mensal > 0
     ? Math.min(100, (memory.total_guardado_mes / meta_mensal) * 100)

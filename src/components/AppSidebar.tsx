@@ -15,6 +15,7 @@ interface NavItem {
   label: string
   path: string
   icon: React.ElementType
+  exact?: boolean
 }
 
 interface NavGroup {
@@ -26,13 +27,18 @@ const navGroups: NavGroup[] = [
   {
     title: 'Principal',
     items: [
-      { label: 'Dashboard', path: '/app', icon: LayoutDashboard },
+      { label: 'Dashboard', path: '/app', icon: LayoutDashboard, exact: true },
       { label: 'Notas', path: '/app/notes', icon: FileText },
       { label: 'Tarefas', path: '/app/tasks', icon: CheckSquare },
       { label: 'Lembretes', path: '/app/reminders', icon: Bell },
       { label: 'Chat IA', path: '/app/ai-chat', icon: Sparkles },
-      { label: 'Minhas Finanças', path: '/app/finance', icon: Wallet },
-      { label: 'Histórico Financeiro', path: '/app/finance/history', icon: TrendingUp },
+    ],
+  },
+  {
+    title: 'Finanças',
+    items: [
+      { label: 'Minhas Finanças', path: '/app/finance', icon: Wallet, exact: true },
+      { label: 'Histórico Anual', path: '/app/finance/history', icon: TrendingUp },
     ],
   },
   {
@@ -60,13 +66,16 @@ export const AppSidebar: React.FC = () => {
   const { workspace } = useAuth()
   const { mobileOpen, closeMobile } = useSidebarCtx()
 
-  const isActive = (path: string) =>
-    path === '/app' ? location.pathname === '/app' : location.pathname.startsWith(path)
+  const isActive = ({ path, exact }: NavItem) => {
+    if (exact) return location.pathname === path
+    return location.pathname.startsWith(path)
+  }
 
-  const renderNavItem = ({ label, path, icon: Icon }: NavItem) => {
-    const active = isActive(path)
+  const renderNavItem = (item: NavItem) => {
+    const { label, path, icon: Icon } = item
+    const active = isActive(item)
 
-    const item = (
+    const el = (
       <NavLink
         key={path}
         to={path}
@@ -87,13 +96,13 @@ export const AppSidebar: React.FC = () => {
     if (collapsed) {
       return (
         <Tooltip key={path} delayDuration={0}>
-          <TooltipTrigger asChild>{item}</TooltipTrigger>
+          <TooltipTrigger asChild>{el}</TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>
         </Tooltip>
       )
     }
 
-    return item
+    return el
   }
 
   const nav = (
@@ -151,7 +160,7 @@ export const AppSidebar: React.FC = () => {
               </p>
             )}
             <div className="space-y-0.5">
-              {items.map(renderNavItem)}
+              {items.map(item => renderNavItem(item))}
             </div>
           </div>
         ))}

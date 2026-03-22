@@ -26,7 +26,7 @@ export const WhatsAppStyleReport: React.FC<WhatsAppStyleReportProps> = ({
         {gastos.length === 0
           ? <p>💰 Nenhum gasto registrado hoje.</p>
           : gastos.map(g => (
-              <p key={g.id}>• {g.title} ({g.data}) — {formatBRL(g.valor)} ({g.data})</p>
+              <p key={g.id}>• {g.title} — {formatBRL(g.valor)} ({g.data})</p>
             ))
         }
         {gastos.length > 0 && (
@@ -47,7 +47,7 @@ export const WhatsAppStyleReport: React.FC<WhatsAppStyleReportProps> = ({
         {gastos.length === 0
           ? <p>💰 Nenhum gasto registrado este mês.</p>
           : gastos.map(g => (
-              <p key={g.id}>• {g.title} ({g.data}) — {formatBRL(g.valor)} ({g.data})</p>
+              <p key={g.id}>• {g.title} — {formatBRL(g.valor)} ({g.data})</p>
             ))
         }
         {gastos.length > 0 && (
@@ -68,7 +68,7 @@ export const WhatsAppStyleReport: React.FC<WhatsAppStyleReportProps> = ({
   // mode === 'reservas'
   return (
     <div className="font-mono text-xs space-y-1.5 bg-muted/40 rounded-lg p-3 border border-border">
-      <p className="text-sm">Estou filtrando todas as suas notas de reserva para calcular o total guardado. Só um momento...</p>
+      <p className="font-semibold text-sm">Reservas (poupança) — Este mês:</p>
       {reservas.length === 0
         ? <p>💰 Nenhuma reserva encontrada.</p>
         : reservas.map((r, i) => (
