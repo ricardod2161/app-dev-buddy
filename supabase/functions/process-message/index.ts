@@ -552,6 +552,7 @@ ${tasksContext}
 
 **Próximos lembretes (${upcomingReminders?.length ?? 0}):**
 ${remindersContext}${financialContext}
+${memoryBlock}
 
 ## Tratamento de Áudio 🎤
 ${message_type === 'audio' ? `A mensagem atual é um ÁUDIO transcrito. Regras obrigatórias:
