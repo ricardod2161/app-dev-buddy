@@ -7,12 +7,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2, Calculator } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, RotateCcw, BarChart2, Sparkles, CheckCircle2, Calculator, CalendarPlus } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservasMensais } from '../hooks/useReservasMensais'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
 import { EditMetaDialog } from '../components/EditMetaDialog'
+import { ManualReservaDialog } from '../components/ManualReservaDialog'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
 import {
@@ -21,6 +22,7 @@ import {
   upsertFinanceMemory,
   type CleanupResult,
 } from '../services/finance.service'
+import { supabase } from '@/integrations/supabase/client'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
@@ -31,6 +33,7 @@ const FinanceDashboard: React.FC = () => {
   const [cleaning, setCleaning] = useState(false)
   const [recalculating, setRecalculating] = useState(false)
   const [editingMeta, setEditingMeta] = useState(false)
+  const [manualReserva, setManualReserva] = useState(false)
   const [lastCleanup, setLastCleanup] = useState<CleanupResult | null>(null)
 
   const { data: gastosMes = [], isLoading: loadingMes } = useGastosMensais(workspaceId)
@@ -102,6 +105,36 @@ const FinanceDashboard: React.FC = () => {
     }
   }
 
+  const handleManualReserva = async (dates: string[], valor: number) => {
+    if (!workspaceId) return
+    let created = 0
+    for (const dateIso of dates) {
+      const [y, m, d] = dateIso.split('-')
+      const label = `${d}/${m}`
+      const { error } = await supabase.from('notes').insert({
+        workspace_id: workspaceId,
+        title: `Gasto com Reserva (${label})`,
+        content: `• Reserva Diária (Meta Anual): R$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        category: 'Financeiro',
+        tags: [],
+        created_at: new Date(`${dateIso}T12:00:00`).toISOString(),
+      })
+      if (!error) created++
+      else console.error('Erro ao inserir reserva manual:', error)
+    }
+    if (created > 0) {
+      toast.success(`${created} reserva(s) registrada(s) com sucesso!`)
+      // Recalculate total from real notes
+      try {
+        const { total } = await recalcularTotalGuardado(workspaceId)
+        toast.success(`Total atualizado: ${formatBRL(total)}`)
+      } catch { /* non-critical */ }
+      invalidateAll()
+    } else {
+      toast.error('Não foi possível registrar as reservas')
+    }
+  }
+
   if (!workspaceId) {
     return <EmptyState title="Sem workspace" description="Faça login para acessar suas finanças." icon={Wallet} />
   }
@@ -148,6 +181,15 @@ const FinanceDashboard: React.FC = () => {
               ? <RefreshCw className="w-4 h-4 animate-spin" />
               : <Calculator className="w-4 h-4" />
             }
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Registrar reservas de dias anteriores manualmente"
+            onClick={() => setManualReserva(true)}
+          >
+            <CalendarPlus className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="icon" asChild className="h-8 w-8">
             <Link to="/app/finance/history">
@@ -293,6 +335,14 @@ const FinanceDashboard: React.FC = () => {
         mesLabel={mesAtual}
         diasNoMes={diasNoMes}
         onSave={handleSaveMeta}
+      />
+
+      {/* ── Manual Reserva Dialog ── */}
+      <ManualReservaDialog
+        open={manualReserva}
+        onOpenChange={setManualReserva}
+        metaDiaria={metaDiaria}
+        onSave={handleManualReserva}
       />
     </div>
   )
