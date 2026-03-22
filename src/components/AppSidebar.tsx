@@ -31,6 +31,7 @@ const navGroups: NavGroup[] = [
       { label: 'Tarefas', path: '/app/tasks', icon: CheckSquare },
       { label: 'Lembretes', path: '/app/reminders', icon: Bell },
       { label: 'Chat IA', path: '/app/ai-chat', icon: Sparkles },
+      { label: 'Minhas Finanças', path: '/app/finance', icon: Wallet },
     ],
   },
   {
