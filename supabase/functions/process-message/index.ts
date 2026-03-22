@@ -241,6 +241,7 @@ Deno.serve(async (req) => {
       { data: pendingTasks },
       { data: upcomingReminders },
       { data: todayFinancialNotes },
+      { data: userMemory },
     ] = await Promise.all([
       // conversation history — 8 for simple, 12 for complex
       supabase
@@ -282,6 +283,12 @@ Deno.serve(async (req) => {
             .or(`category.eq.Financeiro,title.ilike.%reais%,content.ilike.%reais%,title.ilike.%R$%,content.ilike.%R$%`)
             .gte('created_at', todayStart.toISOString())
         : Promise.resolve({ data: [] as { title: string | null; content: string | null }[], error: null }),
+      // persistent financial memory
+      supabase
+        .from('user_memory')
+        .select('meta_diaria, total_guardado_mes, ultima_reserva_data, ultima_reserva_valor, mes_referencia')
+        .eq('workspace_id', workspace_id)
+        .maybeSingle(),
     ])
 
     const history = (historyRows ?? []).reverse()
