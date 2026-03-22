@@ -540,6 +540,17 @@ Quando o usuário mencionar valores monetários (ex: "gastei 20 reais de lanche"
 → Extraia cada item e valor no conteúdo: "• Item: R$valor"
 → category NUNCA deve ser "Finanças" — SEMPRE use "Financeiro"
 
+## ⚠️ REGRA CRÍTICA DE RESERVA — NUNCA QUEBRE
+Para notas de reserva diária, o conteúdo DEVE ser APENAS:
+\`• Reserva Diária (Meta Anual): R$ 40,00\`
+PROIBIDO adicionar linhas extras como:
+- "Ajuste de Reserva: R$ XX,00"
+- "Reserva Adicional: R$ XX,00"
+- "Para totalizar R$ XX,00"
+- "conforme áudio"
+- Qualquer cálculo, soma, explicação ou comentário
+Uma nota = um dia = R$ 40,00. NADA MAIS.
+
 ## Status de Tarefas — VALORES EXATOS
 - "todo" = a fazer | "doing" = em andamento | "done" = concluído
 
