@@ -33,6 +33,7 @@ const FinanceDashboard: React.FC = () => {
   const [cleaning, setCleaning] = useState(false)
   const [recalculating, setRecalculating] = useState(false)
   const [editingMeta, setEditingMeta] = useState(false)
+  const [manualReserva, setManualReserva] = useState(false)
   const [lastCleanup, setLastCleanup] = useState<CleanupResult | null>(null)
 
   const { data: gastosMes = [], isLoading: loadingMes } = useGastosMensais(workspaceId)
