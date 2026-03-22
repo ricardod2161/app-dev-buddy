@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client'
 import type { FinanceMemory, GastoEntry, ReservaEntry } from '../types/transaction.types'
 import { parseMonetaryValue, formatDateDDMM, currentMonthKey } from '../lib/parse-finance'
+import type { MesHistorico } from '../hooks/useHistoricoMensal'
 
 function noteToGasto(note: { id: string; title: string | null; content: string | null; category: string | null; created_at: string }): GastoEntry {
   const valor = parseMonetaryValue(note.content ?? note.title ?? '') ?? 0
