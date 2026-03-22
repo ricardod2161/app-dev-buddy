@@ -12,6 +12,7 @@ import LogsPage from '@/pages/app/Logs'
 import RemindersPage from '@/pages/app/Reminders'
 import ContactsPage from '@/pages/app/Contacts'
 import AIChatPage from '@/pages/app/AIChat'
+import FinanceDashboard from '@/features/finance/pages/FinanceDashboard'
 
 export interface AppRoute {
   path: string

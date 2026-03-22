@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -14,23 +14,18 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Sparkles, Download, Send, BrainCircuit, Info, ChevronRight, X,
-  Mic, MessageSquare,
+  Sparkles, Download, BrainCircuit, Info, ChevronRight, X, Mic, MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { toast } from 'sonner'
 import { EmptyState } from '@/components/EmptyState'
-
-// Feature modules
-import { parseActionsFromText } from '@/features/ai-chat/lib/parse-actions'
-import { streamAIChat } from '@/features/ai-chat/lib/stream-chat'
 import { exportConversationMD } from '@/features/ai-chat/lib/export-markdown'
-import { executeActions } from '@/features/ai-chat/services/action-executor'
-import { MessageBubble, type ChatMessage } from '@/features/ai-chat/components/MessageBubble'
-import { ConversationSidebar, type AIConversation } from '@/features/ai-chat/components/ConversationSidebar'
+import { MessageBubble } from '@/features/ai-chat/components/MessageBubble'
+import { ConversationSidebar } from '@/features/ai-chat/components/ConversationSidebar'
 import { ChatComposer } from '@/features/ai-chat/components/ChatComposer'
 import { useVoiceInput } from '@/features/ai-chat/hooks/useVoiceInput'
 import { useProactiveMode } from '@/features/ai-chat/hooks/useProactiveMode'
+import { useAIChat } from '@/features/ai-chat/hooks/useAIChat'
+import { useAIConversations } from '@/features/ai-chat/hooks/useAIConversations'
 
 const MODELS = [
   { id: 'google/gemini-3-flash-preview', label: 'Flash Preview', badge: 'Rápido' },
@@ -46,18 +41,11 @@ const FALLBACK_PROMPTS = [
   'Analisa minha produtividade e dá sugestões de melhoria',
 ]
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const sb = supabase as any
-
 const AIChat: React.FC = () => {
   const { workspaceId } = useAuth()
   const location = useLocation()
-  const qc = useQueryClient()
 
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
   const [model, setModel] = useState('google/gemini-3-flash-preview')
   const [includeContext, setIncludeContext] = useState(true)
   const [deepThink, setDeepThink] = useState(false)
@@ -70,10 +58,9 @@ const AIChat: React.FC = () => {
   const [convSearch, setConvSearch] = useState('')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Persist proactive mode preference
+  // Persist proactive mode
   useEffect(() => {
     try { localStorage.setItem('zyntra_proactive_mode', String(proactiveMode)) } catch { /* ignore */ }
   }, [proactiveMode])
@@ -81,22 +68,21 @@ const AIChat: React.FC = () => {
   // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages])
+  })
 
-  // Handle incoming prompt from navigation state (Dashboard ZYNTRA card)
+  // Handle incoming prompt from navigation state
   useEffect(() => {
     const state = location.state as { prompt?: string } | null
     if (state?.prompt) {
       setInput(state.prompt)
       window.history.replaceState({}, '', location.pathname)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location])
 
-  // Cleanup on unmount
+  // Cleanup TTS on unmount
   useEffect(() => {
-    return () => {
-      window.speechSynthesis?.cancel()
-    }
+    return () => { window.speechSynthesis?.cancel() }
   }, [])
 
   // Voice input
@@ -104,23 +90,33 @@ const AIChat: React.FC = () => {
     setInput(prev => prev ? prev + ' ' + transcript : transcript)
   })
 
-  // Load conversations
-  const { data: conversations = [], isLoading: loadingConvs } = useQuery({
-    queryKey: ['ai-conversations', workspaceId],
-    queryFn: async () => {
-      if (!workspaceId) return []
-      const { data, error } = await sb
-        .from('ai_conversations')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .order('updated_at', { ascending: false })
-      if (error) throw error
-      return (data ?? []) as AIConversation[]
-    },
-    enabled: !!workspaceId,
+  // Conversations CRUD
+  const { conversations, isLoading: loadingConvs, deleteConv } = useAIConversations(workspaceId)
+
+  // Chat logic (extracted hook)
+  const {
+    chatMessages, setChatMessages,
+    input, setInput,
+    isStreaming,
+    handleSend, handleRegenerate, handleStop, handleKeyDown,
+    loadMessages, clearMessages,
+  } = useAIChat({
+    workspaceId,
+    selectedConvId,
+    setSelectedConvId,
+    model,
+    includeContext,
+    deepThink,
   })
 
-  // Load context counts for banner
+  // Load messages when conversation is selected
+  useEffect(() => {
+    if (selectedConvId) loadMessages(selectedConvId)
+    else setChatMessages([])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConvId])
+
+  // Load context counts
   useEffect(() => {
     if (!workspaceId || !includeContext) { setContextLoaded(null); return }
     Promise.all([
@@ -131,184 +127,10 @@ const AIChat: React.FC = () => {
     })
   }, [workspaceId, includeContext])
 
-  // Load messages for selected conversation
-  useEffect(() => {
-    if (!selectedConvId || !workspaceId) return
-    sb
-      .from('ai_messages')
-      .select('*')
-      .eq('conversation_id', selectedConvId)
-      .neq('role', 'system')
-      .order('created_at', { ascending: true })
-      .then(({ data }: { data: Array<{ id: string; role: string; content: string }> | null }) => {
-        if (data) {
-          setChatMessages(data.map(m => ({
-            id: m.id,
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-          })))
-        }
-      })
-  }, [selectedConvId, workspaceId])
-
-  // Create conversation mutation
-  const createConvMut = useMutation({
-    mutationFn: async (firstMessage: string) => {
-      if (!workspaceId) throw new Error('No workspace')
-      const title = firstMessage.length > 50 ? firstMessage.slice(0, 50) + '…' : firstMessage
-      const { data, error } = await sb
-        .from('ai_conversations')
-        .insert({ workspace_id: workspaceId, title, model })
-        .select()
-        .single()
-      if (error) throw error
-      return data as AIConversation
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ai-conversations', workspaceId] }),
-  })
-
-  const saveMessage = useCallback(async (convId: string, role: 'user' | 'assistant', content: string) => {
-    if (!workspaceId) return
-    await sb.from('ai_messages').insert({ conversation_id: convId, workspace_id: workspaceId, role, content })
-  }, [workspaceId])
-
-  const deleteConvMut = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await sb.from('ai_conversations').delete().eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: (_, id) => {
-      qc.invalidateQueries({ queryKey: ['ai-conversations', workspaceId] })
-      if (selectedConvId === id) { setSelectedConvId(null); setChatMessages([]) }
-    },
-  })
-
-  const handleNewChat = () => {
-    setSelectedConvId(null)
-    setChatMessages([])
-    setInput('')
-    window.speechSynthesis?.cancel()
-    setMobileSidebarOpen(false)
-  }
-
-  const handleSelectConv = (id: string) => {
-    setSelectedConvId(id)
-    setChatMessages([])
-    setMobileSidebarOpen(false)
-  }
-
-  const handleSend = useCallback(async (overrideText?: string) => {
-    const text = (overrideText ?? input).trim()
-    if (!text || isStreaming || !workspaceId) return
-
-    setInput('')
-
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text }
-    const assistantMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', isStreaming: true }
-
-    setChatMessages(prev => [...prev, userMsg, assistantMsg])
-    setIsStreaming(true)
-
-    let convId = selectedConvId
-    if (!convId) {
-      try {
-        const conv = await createConvMut.mutateAsync(text)
-        convId = conv.id
-        setSelectedConvId(conv.id)
-      } catch {
-        toast.error('Erro ao criar conversa')
-        setIsStreaming(false)
-        return
-      }
-    }
-
-    await saveMessage(convId, 'user', text)
-
-    const historyForAPI = [
-      ...chatMessages.filter(m => !m.isStreaming).map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: text },
-    ]
-
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    let accum = ''
-
-    try {
-      await streamAIChat({
-        messages: historyForAPI,
-        model: deepThink ? 'google/gemini-2.5-pro' : model,
-        workspaceId,
-        includeContext,
-        deepThink,
-        signal: ctrl.signal,
-        onDelta: (chunk) => {
-          accum += chunk
-          const { cleanText } = parseActionsFromText(accum)
-          setChatMessages(prev =>
-            prev.map(m => m.id === assistantMsg.id ? { ...m, content: cleanText, isStreaming: true } : m)
-          )
-        },
-        onDone: async () => {
-          const { cleanText, actions } = parseActionsFromText(accum)
-          setChatMessages(prev =>
-            prev.map(m => m.id === assistantMsg.id
-              ? { ...m, content: cleanText, isStreaming: false, actions: actions.length > 0 ? actions : undefined }
-              : m
-            )
-          )
-          setIsStreaming(false)
-
-          if (actions.length > 0) {
-            await executeActions(actions, workspaceId, (type) => {
-              qc.invalidateQueries({ queryKey: [type, workspaceId] })
-            })
-          }
-
-          if (convId) await saveMessage(convId, 'assistant', cleanText)
-          await sb.from('ai_conversations').update({ updated_at: new Date().toISOString() }).eq('id', convId)
-          qc.invalidateQueries({ queryKey: ['ai-conversations', workspaceId] })
-        },
-        onError: (err) => {
-          toast.error(err)
-          setChatMessages(prev => prev.filter(m => m.id !== assistantMsg.id))
-          setIsStreaming(false)
-        },
-      })
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
-        toast.error('Erro ao processar mensagem')
-        setChatMessages(prev => prev.filter(m => m.id !== assistantMsg.id))
-      }
-      setIsStreaming(false)
-    }
-  }, [input, isStreaming, workspaceId, selectedConvId, chatMessages, model, includeContext, deepThink, createConvMut, saveMessage, qc])
-
-  const handleRegenerate = useCallback(async () => {
-    if (isStreaming || chatMessages.length < 2) return
-    const lastUser = [...chatMessages].reverse().find(m => m.role === 'user')
-    if (!lastUser) return
-    setChatMessages(prev => prev.filter((_, i) => i < prev.length - 1))
-    setInput(lastUser.content)
-    setTimeout(() => handleSend(lastUser.content), 50)
-  }, [isStreaming, chatMessages, handleSend])
-
-  const handleStop = () => {
-    abortRef.current?.abort()
-    setIsStreaming(false)
-    setChatMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m))
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  // Proactive mode hook
+  // Proactive mode
   useProactiveMode({ workspaceId, proactiveMode, onTrigger: handleSend })
 
-  // Dynamic suggested prompts
+  // Suggested prompts
   const { data: urgentTasks } = useQuery({
     queryKey: ['ai-chat-urgent-tasks', workspaceId],
     queryFn: async () => {
@@ -328,7 +150,7 @@ const AIChat: React.FC = () => {
 
   const suggestedPrompts = React.useMemo(() => {
     if (urgentTasks && urgentTasks.length > 0) {
-      const dynamic = urgentTasks.map(t => `Me ajuda a concluir a tarefa: "${t.title}"`)
+      const dynamic = urgentTasks.map((t: { title: string }) => `Me ajuda a concluir a tarefa: "${t.title}"`)
       if (urgentTasks.length >= 2) {
         dynamic.push(`Como priorizar: "${urgentTasks[0].title}" vs "${urgentTasks[1].title}"?`)
       } else {
@@ -339,13 +161,23 @@ const AIChat: React.FC = () => {
     return FALLBACK_PROMPTS
   }, [urgentTasks])
 
+  const handleNewChat = () => {
+    setSelectedConvId(null)
+    clearMessages()
+    setMobileSidebarOpen(false)
+  }
+
+  const handleSelectConv = (id: string) => {
+    setSelectedConvId(id)
+    setMobileSidebarOpen(false)
+  }
+
   if (!workspaceId) {
     return <EmptyState title="Sem workspace" description="Faça login para usar o Chat IA." icon={MessageSquare} />
   }
 
   return (
     <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-border bg-card">
-      {/* Conversation Sidebar — desktop panel + mobile Sheet */}
       <ConversationSidebar
         conversations={conversations}
         isLoading={loadingConvs}
@@ -353,7 +185,7 @@ const AIChat: React.FC = () => {
         proactiveMode={proactiveMode}
         convSearch={convSearch}
         onSelectConv={handleSelectConv}
-        onDeleteConv={(id) => deleteConvMut.mutate(id)}
+        onDeleteConv={deleteConv}
         onNewChat={handleNewChat}
         onProactiveModeChange={setProactiveMode}
         onSearchChange={setConvSearch}
@@ -366,15 +198,12 @@ const AIChat: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 border-b border-border bg-card shrink-0 gap-2 sm:gap-3">
           <div className="flex items-center gap-1 sm:gap-2">
-            {/* Mobile: open sidebar drawer */}
             <Button
               variant="ghost" size="icon" className="h-8 w-8 lg:hidden"
-              onClick={() => setMobileSidebarOpen(true)}
-              title="Ver conversas"
+              onClick={() => setMobileSidebarOpen(true)} title="Ver conversas"
             >
               <MessageSquare className="w-4 h-4" />
             </Button>
-            {/* Desktop: toggle sidebar panel */}
             <Button
               variant="ghost" size="icon" className="h-8 w-8 hidden lg:flex"
               onClick={() => setDesktopSidebarOpen(v => !v)}
@@ -390,13 +219,11 @@ const AIChat: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
-            {/* Context toggle */}
             <div className="hidden sm:flex items-center gap-1.5">
               <Switch id="ctx-toggle" checked={includeContext} onCheckedChange={setIncludeContext} className="scale-75" />
               <Label htmlFor="ctx-toggle" className="text-xs cursor-pointer whitespace-nowrap">Contexto</Label>
             </div>
 
-            {/* Deep Think toggle */}
             <div className="flex items-center gap-1.5">
               <Switch id="dt-toggle" checked={deepThink} onCheckedChange={setDeepThink} className="scale-75" />
               <Label htmlFor="dt-toggle" className={cn('text-xs cursor-pointer flex items-center gap-1 whitespace-nowrap', deepThink && 'text-primary font-medium')}>
@@ -405,7 +232,6 @@ const AIChat: React.FC = () => {
               </Label>
             </div>
 
-            {/* Model selector */}
             <Select value={model} onValueChange={setModel} disabled={deepThink}>
               <SelectTrigger className="h-7 text-xs w-32 sm:w-40">
                 <SelectValue />
@@ -447,7 +273,7 @@ const AIChat: React.FC = () => {
           </div>
         </div>
 
-        {/* Context / Deep Think banners */}
+        {/* Banners */}
         {includeContext && contextLoaded && (
           <div className="flex items-center gap-2 px-4 py-1.5 bg-primary/5 border-b border-primary/10 text-xs text-primary">
             <Info className="w-3.5 h-3.5 shrink-0" />
