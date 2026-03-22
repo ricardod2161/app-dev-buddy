@@ -1,6 +1,7 @@
 import React from 'react'
 import { cn } from '@/lib/utils'
 import { formatBRL } from '../lib/parse-finance'
+import { Pencil } from 'lucide-react'
 
 interface MetaDiariaProgressProps {
   totalGuardado: number
@@ -8,10 +9,11 @@ interface MetaDiariaProgressProps {
   metaDiaria: number
   progresso: number   // 0–100
   mesLabel: string
+  onEditMeta?: () => void
 }
 
 export const MetaDiariaProgress: React.FC<MetaDiariaProgressProps> = ({
-  totalGuardado, metaMensal, metaDiaria, progresso, mesLabel,
+  totalGuardado, metaMensal, metaDiaria, progresso, mesLabel, onEditMeta,
 }) => {
   const corClass = progresso >= 100 ? 'text-green-600 dark:text-green-400'
     : progresso >= 50 ? 'text-primary'
@@ -39,9 +41,21 @@ export const MetaDiariaProgress: React.FC<MetaDiariaProgressProps> = ({
         <span>Meta: {formatBRL(metaMensal)}</span>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        Meta diária: <strong className="text-foreground">{formatBRL(metaDiaria)}/dia</strong>
-      </p>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <p>
+          Meta diária: <strong className="text-foreground">{formatBRL(metaDiaria)}/dia</strong>
+        </p>
+        {onEditMeta && (
+          <button
+            onClick={onEditMeta}
+            className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+            title="Editar meta diária"
+          >
+            <Pencil className="w-3 h-3" />
+            <span>Editar meta</span>
+          </button>
+        )}
+      </div>
     </div>
   )
 }
