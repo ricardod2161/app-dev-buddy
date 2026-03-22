@@ -1,96 +1,94 @@
 
+## Análise Completa — 4 problemas críticos identificados
 
-## Diagnóstico completo
-
-### Onde o 40 está hardcoded (precisa ser dinâmico):
-
-1. `FinanceHistory.tsx` linha 21: `const META_ANUAL = 40 * 365` — fixo, não lê do banco
-2. `FinanceHistory.tsx` linha 31: `function metaMensalForKey` — usa `40 * daysInMonth` fixo
-3. `FinanceHistory.tsx` linha 46: tooltip usa `40 * 30` fixo
-4. `finance.service.ts` linha 204 e 1088: `meta_diaria: 40.00` hardcoded no upsert
-5. `finance.service.ts` linha 377: `const META_MENSAL = 40 * daysInThisMonth` no histórico
-6. `FinanceDashboard.tsx` linha 34: `?? 40` é só fallback (ok), mas a meta mensal usa `metaDiaria * 30` se não tiver memory
-
-### O que o usuário quer
-
-Poder editar a meta diária e anual diretamente nas páginas de finanças — não só em Configurações. Qualquer mudança deve se propagar imediatamente para todos os cálculos (progresso, gráfico, tabela).
-
-### Solução
-
-**Inline edit** nas duas páginas com um pequeno popover/dialog de edição:
-
-**`FinanceDashboard`** — clicar no valor "Meta: R$ 1.240,00" ou "Meta diária: R$ 40/dia" no componente MetaDiariaProgress abre um input inline para editar. Salva via `upsertFinanceMemory` e invalida queries.
-
-**`FinanceHistory`** — o badge "R$ 40/dia × 365 = R$ 14.600" vira clicável (ícone de lápis ao lado), abre um Dialog com:
-- Input "Meta diária (R$)": ex. 40
-- Meta anual calculada automaticamente: R$ X × 365 = R$ Y (read-only, atualiza live)
-- Botão Salvar → upsert em `user_memory` + invalida queries
-
-**`MetaDiariaProgress`** — adicionar prop `onEditMeta` opcional, mostrando ícone de lápis clicável ao lado da linha "Meta diária: R$ 40/dia".
-
-**`getHistoricoMensal` e `FinanceHistory`** — passar `metaDiaria` como parâmetro para calcular metas dinamicamente em vez de usar o hardcoded 40.
-
-**`recalcularTotalGuardado`** — ler `meta_diaria` atual do banco antes do upsert (não hardcodar 40).
-
-### Fluxo de dados após mudança
-
+### Problema 1 (Console Error ativo): `EditMetaDialog` — `DialogFooter` recebe ref indiretamente
+O log mostra exatamente:
 ```
-user edits meta → upsert user_memory.meta_diaria
-  → invalidate ['finance-memory', workspaceId]
-  → useTotalGuardado re-fetches → nova metaDiaria
-  → FinanceDashboard recalcula metaMensal, progresso
-  → FinanceHistory recalcula META_ANUAL, barras, tabela
+Warning: Function components cannot be given refs. Check the render method of `EditMetaDialog`.
+at DialogFooter
 ```
+`DialogFooter` do shadcn/ui usa `React.forwardRef` internamente, mas o `Button` dentro do footer não está causando o erro — o erro real é que o `DialogDescription` está faltando no `EditMetaDialog`, e o Radix UI tenta injetar uma ref em um componente filho que não a aceita. O fix é adicionar `<DialogDescription className="sr-only">` dentro do `DialogContent` (já requerido pelo Radix) e também adicionar `DialogDescription` faltante no `FinanceHistory` que usa o mesmo dialog.
 
-## Arquivos modificados (5 arquivos, sem migration)
+Aviso secundário: `Missing Description or aria-describedby={undefined}` confirma isso.
 
-```
-MOD  src/features/finance/components/MetaDiariaProgress.tsx
-       — Adicionar prop onEditMeta?: () => void
-       — Mostrar ícone Pencil clicável ao lado de "Meta diária: R$/dia"
+### Problema 2: Kanban — sem Optimistic Updates (FASE 4 do pedido)
+Em `Tasks.tsx` linha 328–338, `updateStatus` usa `onSuccess: invalidateQueries` — o card só muda de coluna APÓS o retorno do servidor. Com latência de rede, isso resulta em card "pulando de volta" visualmente antes de se mover. 
 
-MOD  src/features/finance/pages/FinanceDashboard.tsx
-       — Estado editingMeta + Dialog de edição inline
-       — Input de meta diária com cálculo live da meta mensal
-       — Salvar via upsertFinanceMemory + invalidateAll
-       — Passar onEditMeta para MetaDiariaProgress
+**Fix**: Adicionar `onMutate` com snapshot + update otimista, e `onError` com rollback.
 
-MOD  src/features/finance/pages/FinanceHistory.tsx
-       — Receber metaDiaria do hook useTotalGuardado (já disponível)
-       — META_ANUAL = metaDiaria * 365 (dinâmico)
-       — metaMensalForKey usa metaDiaria (não hardcoded 40)
-       — Badge da meta anual vira clicável com ícone Pencil
-       — Dialog de edição: input meta diária + preview meta anual live
-       — Salvar via upsertFinanceMemory + invalidate ['finance-memory']
+### Problema 3: Realtime para Notes (FASE 4 do pedido)
+`useDashboardRealtime.ts` já assina `notes` e `tasks` no dashboard — mas a página `/app/notes` **não tem** nenhuma subscription de realtime. Novas notas criadas pelo bot via webhook só aparecem se o usuário pressiona F5.
 
-MOD  src/features/finance/services/finance.service.ts
-       — recalcularTotalGuardado: ler meta_diaria do banco antes de upsert
-         (não hardcodar 40.00 — respeita o que o user definiu)
-       — getHistoricoMensal: aceitar metaDiaria como parâmetro opcional
-         (default 40 para retrocompatibilidade)
+**Fix**: Adicionar `useNotesRealtime(workspaceId)` hook com subscription Supabase na página `Notes.tsx`.
 
-MOD  src/features/finance/hooks/useHistoricoMensal.ts
-       — Aceitar metaDiaria opcional e passar para getHistoricoMensal
+### Problema 4: `FinanceHistory.tsx` — `CustomTooltip` não aceita ref (aviso Recharts)
+O `CustomTooltip` em `FinanceHistory.tsx` linha 32 é declarado como `React.FC<TooltipProps>` simples, mas Recharts internamente tenta passar refs para o componente de tooltip. Isso gera o aviso "Function components cannot be given refs" no console. **Fix**: Wrap com `React.forwardRef` ou converter para `React.memo` com `forwardRef`.
+
+---
+
+## Plano de execução — 4 arquivos, zero migrations
+
+### 1. `src/features/finance/components/EditMetaDialog.tsx`
+- Importar `DialogDescription`
+- Adicionar `<DialogDescription className="sr-only">Editar meta diária e anual</DialogDescription>` dentro do `DialogHeader`
+- Isso resolve o **console error** e o **aria warning** de uma vez
+
+### 2. `src/features/finance/pages/FinanceHistory.tsx`
+- Wrap `CustomTooltip` com `React.forwardRef<HTMLDivElement, TooltipProps>(...)`
+- Retorna o JSX via a função interna, passando `ref` para o container div
+- Resolve o aviso do Recharts sobre refs em function components
+
+### 3. `src/pages/app/Tasks.tsx` — Optimistic Updates no Kanban
+- No `updateStatus` mutation, adicionar:
+  - `onMutate`: snapshot atual via `qc.getQueryData`, aplicar update otimista com `qc.setQueryData`
+  - `onError`: rollback via `qc.setQueryData(snapshot)`
+  - `onSettled`: `qc.invalidateQueries` para sincronizar com o servidor
+- Resultado: card move instantaneamente, reverte só se o backend falhar
+
+```typescript
+onMutate: async ({ id, status }) => {
+  await qc.cancelQueries({ queryKey: ['tasks', workspaceId] })
+  const snapshot = qc.getQueryData<Task[]>(['tasks', workspaceId])
+  qc.setQueryData<Task[]>(['tasks', workspaceId], old =>
+    old?.map(t => t.id === id ? { ...t, status, completed_at: status === 'done' ? new Date().toISOString() : null } : t) ?? []
+  )
+  return { snapshot }
+},
+onError: (_err, _vars, ctx) => {
+  if (ctx?.snapshot) qc.setQueryData(['tasks', workspaceId], ctx.snapshot)
+  toast.error('Erro ao mover tarefa — revertido')
+},
+onSettled: () => qc.invalidateQueries({ queryKey: ['tasks', workspaceId] }),
 ```
 
-### UX do Dialog de edição (ambas as páginas)
+### 4. `src/pages/app/Notes.tsx` — Realtime subscription
+- Importar `useEffect` e `supabase`
+- Adicionar `useEffect` que assina `postgres_changes` na tabela `notes` com filtro `workspace_id=eq.${workspaceId}`
+- Em qualquer evento (`INSERT`, `UPDATE`, `DELETE`), invalidar `['notes', workspaceId]`
+- Retornar `() => supabase.removeChannel(channel)` no cleanup
+
+---
+
+## Arquivos modificados (4 arquivos, 0 migrations)
 
 ```
-┌─────────────────────────────────┐
-│ ✏️  Editar Meta Financeira       │
-├─────────────────────────────────┤
-│ Meta diária                     │
-│ [R$ ____40____]                 │
-│                                 │
-│ Meta mensal (Março/31 dias)     │
-│ R$ 1.240,00  ← atualiza live   │
-│                                 │
-│ Meta anual (365 dias)           │
-│ R$ 14.600,00 ← atualiza live   │
-│                                 │
-│ [Cancelar]  [💾 Salvar meta]    │
-└─────────────────────────────────┘
+FIX  src/features/finance/components/EditMetaDialog.tsx
+       — Adicionar DialogDescription (resolve console error + aria warning)
+
+FIX  src/features/finance/pages/FinanceHistory.tsx
+       — Wrap CustomTooltip com React.forwardRef (resolve aviso Recharts)
+
+FIX  src/pages/app/Tasks.tsx
+       — Optimistic Updates no updateStatus mutation (FASE 4 — Kanban instantâneo)
+
+FIX  src/pages/app/Notes.tsx
+       — Realtime subscription para notas (FASE 4 — novas notas aparecem sem F5)
 ```
 
-Sem migration — `user_memory.meta_diaria` já existe na tabela com `DEFAULT 40.00`.
+### Sobre as FASES 2 e 3 do pedido
 
+**FASE 2 (Multi-tenant)**: O sistema **já está completamente multi-tenant**. Todas as tabelas têm `workspace_id`, todas as queries filtram por ele, e todas as RLS policies usam `is_workspace_member(workspace_id, auth.uid())`. Não há nada a implementar aqui — está pronto.
+
+**FASE 3 (Webhook assíncrono + contexto Gemini)**: Os webhooks **já retornam 200 imediatamente** e disparam `process-message` de forma assíncrona. O `process-message` **já injeta histórico de conversas** (últimas mensagens) no contexto do Gemini. Essas funcionalidades estão implementadas nas edge functions existentes.
+
+O foco real de valor são os 4 bugs/melhorias confirmados pelos console logs e pela análise do código.
