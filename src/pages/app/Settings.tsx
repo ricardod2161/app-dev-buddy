@@ -156,7 +156,7 @@ const SettingsPage: React.FC = () => {
     if (!workspaceId) return
     setSavingMemory(true)
     try {
-      const payload = { meta_diaria: newMeta ?? Number(metaDiariaInput) || 40 }
+      const payload = { meta_diaria: (newMeta ?? (Number(metaDiariaInput) || 40)) }
       if (userMemory?.id) {
         await supabase.from('user_memory').update(payload).eq('workspace_id', workspaceId)
       } else {
