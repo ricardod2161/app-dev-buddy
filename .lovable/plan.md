@@ -1,102 +1,107 @@
 
-## Diagnóstico Final — Causa Raiz Confirmada pelo Banco
+## Diagnóstico cirúrgico — causa raiz encontrada
 
-### O que o banco realmente contém
-- **2 notas de reserva**: 16/03 (R$ 40) e 22/03 (nota suja com linhas de ajuste)
-- **`user_memory.total_guardado_mes = 40`** — apenas 1 reserva foi contabilizada pelo edge function
-- Paulo diz ter R$ 240 guardados = 6 dias × R$ 40 = as outras 4 mensagens **nunca geraram notas no banco**
+### Estado real do banco (confirmado)
 
-### Causa 1 — Anti-duplicata bloqueando dias corretos (BUG CRÍTICO)
-`process-message` linha 1013–1040: a query anti-duplicata usa `.ilike('title', '%reserva%')` + `gte('created_at', todayStart)`. O problema real é que quando Paulo envia áudios como "E os 40?" em DIAS DIFERENTES, o AI às vezes usa `just_reply` em vez de `create_note` — porque o `effectiveText` vira `[Áudio transcrito]: E os 40?` e o model não detecta como reserva nova no contexto. O `todayNotesTitles` mostra "Gasto com Reserva (22/03)" mesmo quando hoje é 17/03 se a nota foi criada recentemente.
+| Nota | Dia | Conteúdo |
+|------|-----|----------|
+| 1 | 16/03 | `• Reserva Diária (Meta Anual): R$ 40,00` ✅ |
+| 2 | 16/03 | `• Reserva: R$ 40,00` — **duplicata do dia 16** |
+| 3 | 17/03 | `• Reserva Diária (Meta Anual): R$ 40,00` ✅ |
+| 4 | 18/03 | `• Reserva Diária (Meta Anual): R$ 40,00` ✅ |
+| 5 | 19/03 | `• Reserva Diária (Meta Anual): R$ 40,00` ✅ |
+| 6 | 19/03 | `• Reserva Diária (Meta Anual): R$ 40,00` — **duplicata do dia 19** |
+| 7 | 22/03 | Nota suja com Ajuste R$120 + Adicional + Adicional |
 
-### Causa 2 — `user_memory` acumula +R$ 40 na rota `skipInsert=true` usando `existingMem.total_guardado_mes` que está errado (40, não 80)
-Quando o skip acontece, o `replyText` usa `currentTotal` = valor da `user_memory` que já está errado. A IA então confirma o total errado no WhatsApp.
+**Total real correto: R$ 240** (dias: 16, 17, 18, 19, 20, 21 ou 22 — 6 dias × R$ 40)  
+**Total real único por dia: R$ 280 se contar duplicatas, ou R$ 240 deduplicated**
 
-### Causa 3 — `recalcularTotalGuardado` filtra por `startOfMonth` com UTC  
-`new Date(now.getFullYear(), now.getMonth(), 1).toISOString()` em São Paulo às 21:00 = 00:00 UTC do dia 1 — correto. Mas o 16/03 tem `created_at: 2026-03-16 21:25:09+00` = 18:25 em Brasília — deveria aparecer. A função **está correta** mas só conta 2 notas (R$ 80) porque só existem 2.
+### Bug 1 — CRÍTICO: `getReservasMes` e `recalcularTotalGuardado` somam por NOTA, não por DIA
 
-### Causa 4 — Dashboard mostra R$ 40 porque lê `user_memory.total_guardado_mes` que nunca foi atualizado além de R$ 40
-A rota `create_note` + `skipInsert=false` só rodou 1x (para a nota 16/03 que foi a primeira). A nota 22/03 foi criada quando já existia uma nota do dia → `skipInsert=true` → `currentTotal` lido da `user_memory` = 40 → somou +40 = 80? Não — a query anti-duplicata da nota 22/03 verificou `gte('created_at', todayStart)` corretamente, encontrou ZERO notas de reserva do dia 22/03 às 16:45 (a nota 22/03 é criada às 16:45), mas como o usuário mandou múltiplos áudios no dia 22, o terceiro/quarto áudio encontrou a nota criada no mesmo dia → `skipInsert=true`, `currentTotal` = 40 (a memória estava em 40), não somou +40 para o mês. **O bug está aqui: o skip path NÃO atualiza `user_memory` com o total correto do mês, apenas lê o valor antigo.**
+O banco tem **7 notas** mas apenas **6 dias únicos**. O 16/03 tem 2 notas, o 19/03 tem 2 notas. O parser conta cada nota separada → resultando em totais errados.
 
-### Causa 5 — Console errors: `MetaDiariaProgress` e `WhatsAppStyleReport` não usam `React.forwardRef`
-Radix UI (Tabs, Card) injeta refs em filhos diretos. Ambos os componentes são `React.FC` simples.
+A lógica `cleanDuplicateReservas` deveria ter mesclado as duplicatas, mas não foi executada (ou não encontrou as notas 16/03 pois elas têm conteúdos diferentes: "Reserva Diária" vs "Reserva:").
 
----
+### Bug 2 — CRÍTICO: `cleanDuplicateReservas` não detecta notas do mesmo dia com conteúdos diferentes
 
-## Plano de Correção — 4 arquivos
+O Step 3 (merge same-day) agrupa por `created_at.substring(0, 10)` = data UTC. A nota 1 do dia 16/03 tem `created_at: 2026-03-16 15:00:00+00` e a nota 2 tem `2026-03-16 21:25:09+00` — ambas têm dia `2026-03-16`. Mas o merge não foi executado porque a Step 3 usa `byDay[day] = []` e só agrupa notas que passam pelo filtro `.or('title.ilike.%reserva%,content.ilike.%reserva%')`. **Isso está correto — o merge deveria ter funcionado.**
 
-### Fix 1 — `supabase/functions/process-message/index.ts` (CRÍTICO)
+**A causa real**: `getReservasMes` e `recalcularTotalGuardado` somam TODAS as notas individualmente, incluindo as duplicatas de dias que não foram limpas ainda. Resultado: a soma dá R$ 40 (apenas 1 nota via `parseReservaTotalFromContent`) porque a nota 22/03 tem o `PRIMARY_RESERVA_PATTERN` match e retorna R$ 40, mais 6 notas limpas = R$ 280. Mas o dashboard mostra R$ 40 porque `user_memory.total_guardado_mes = 40` e o `totalReservas` do `useReservasMensais` tem `staleTime: 30_000` — a query pode estar servindo dados em cache desatualizados.
 
-**Problema A**: No path `skipInsert=true` (reserva já existe hoje), o código lê `existingMem.total_guardado_mes` da `user_memory` que pode estar desatualizado. Precisa recalcular da fonte real — as notas.
+**Confirmação**: O `useTotalGuardado` lê `memory.total_guardado_mes = 40` (stale do banco). O `totalGuardado` no dashboard é `totalReservas > 0 ? totalReservas : memory.total_guardado_mes`. Se `useReservasMensais` está retornando as notas corretamente, `totalReservas` DEVERIA ser R$ 280+ (7 notas × R$ 40). Se está mostrando R$ 40, há um problema de cache ou de staleTime.
 
-**Solução**: No path `skipInsert=true`, fazer um SELECT `COUNT(*)` de notas de reserva do mês e multiplicar por `meta_diaria` para responder com o total correto. OU simplesmente não usar o skip path para atualizar total — sempre ler da memória corrigida.
+### Bug 3 — A lógica de fallback usa `user_memory.total_guardado_mes = 40`
 
-**Problema B**: A nota 22/03 foi criada pelo AI com conteúdo sujo porque o AI gerou "Ajuste de Reserva: R$ 120,00" — isso é o AI sendo mal instruído. O system prompt precisa de instrução explícita: "NUNCA adicione linhas de ajuste, totalização ou cálculo no conteúdo das notas de reserva. O conteúdo DEVE ser apenas: `• Reserva Diária: R$ {meta_diaria},00`".
-
-**Problema C**: `meta_diaria: 40.00` hardcoded no upsert da `user_memory` (linha 1088) — deve ler do banco. Já foi identificado antes mas não foi corrigido no edge function.
-
-**Solução C**: Ler `meta_diaria` do `userMemory` já buscado no contexto (linha 289), usar esse valor.
-
-### Fix 2 — `supabase/functions/process-message/index.ts` — Recalcular total do mês do banco de dados
-
-Ao registrar uma reserva com sucesso (não skip), em vez de somar `+40` ao total da memória, fazer um SELECT COUNT de todas as notas de reserva do mês para calcular o total real:
-
+Mesmo que `totalReservas` calcule correto, a linha:
 ```typescript
-// Count reserva notes for this month
-const { count } = await supabase
-  .from('notes')
-  .select('id', { count: 'exact' })
-  .eq('workspace_id', workspace_id)
-  .eq('category', 'Financeiro')
-  .ilike('title', '%reserva%')
-  .gte('created_at', startOfMonth.toISOString())
+const totalGuardado = totalReservas > 0 ? totalReservas : (totalData?.memory?.total_guardado_mes ?? 0)
+```
+só usa `memory` se `totalReservas === 0`. O problema é que `user_memory.total_guardado_mes = 40` nunca é corrigido automaticamente — fica defasado.
 
-const newTotal = (count ?? 1) * metaDiariaValue  // cada nota = R$ 40
+### Bug 4 — `staleTime: 30_000` não invalida entre sessões
+
+Se o usuário adicionou as reservas manuais e depois recarregou a página, o TanStack Query ainda pode servir cache em memória por 30 segundos. Mas o problema mais sério é: o `invalidateAll()` é chamado depois do `handleManualReserva`, mas o componente não faz **auto-refresh ao montar** — depende de dados já em cache.
+
+### Solução definitiva — 4 mudanças
+
+**Mudança 1 — `recalcularTotalGuardado` (finance.service.ts)**  
+Em vez de somar `parseReservaTotalFromContent` por nota (que pode contar duplicatas), deduplicate por dia:
+```typescript
+// Agrupar por dia, pegar apenas 1 nota por dia (a mais limpa)
+const byDay = new Map<string, number>()
+for (const note of notes) {
+  const dia = note.created_at.substring(0, 10) // YYYY-MM-DD
+  if (!byDay.has(dia)) {  // primeira nota do dia = valor correto
+    const fullText = [note.title ?? '', note.content ?? ''].join('\n')
+    const valor = parseReservaTotalFromContent(fullText)
+    if (valor > 0) byDay.set(dia, valor)
+  }
+}
+const total = [...byDay.values()].reduce((s, v) => s + v, 0)
+const notasContadas = byDay.size
 ```
 
-Isso garante que `user_memory` sempre reflete o estado real das notas, não um contador acumulativo que pode desincronizar.
+**Mudança 2 — `getReservasMes` (finance.service.ts)**  
+Mesma lógica: deduplicate por dia antes de retornar. Uma entrada por dia único. Isso corrige `totalReservas` no dashboard.
 
-### Fix 3 — `src/features/finance/components/MetaDiariaProgress.tsx`
-Wrap com `React.forwardRef` para resolver console error.
+**Mudança 3 — `FinanceDashboard` — auto-recalcular ao montar**  
+Adicionar um `useEffect` que chama `recalcularTotalGuardado` silenciosamente ao montar o componente (se `user_memory` estiver defasado — verificar se `total_guardado_mes` difere do que as notas dizem). Na prática: disparar `recalcularTotalGuardado` em background ao carregar a página e invalidar queries.
 
-### Fix 4 — `src/features/finance/components/WhatsAppStyleReport.tsx`
-Wrap com `React.forwardRef` para resolver console error.
+**Mudança 4 — `staleTime: 0` para finance-reservas-mes**  
+Mudar o staleTime de `useReservasMensais` para `0` (sempre refetch ao montar) — dados financeiros devem ser sempre frescos.
 
-### Fix 5 — `src/features/finance/services/finance.service.ts` — `recalcularTotalGuardado`
-A função conta notas via `parseReservaTotalFromContent` (smart parser). Isso está correto mas retorna R$ 80. O botão no dashboard vai sincronizar `user_memory` para R$ 80. Depois o usuário pode criar as notas dos dias que faltam via WhatsApp.
-
-**Adicionalmente**: expor um novo botão "Registrar reserva manual" no dashboard para o usuário adicionar retroativamente dias que o bot não registrou.
+**Mudança 5 — Melhorias de UI:**
+- Adicionar botão "Limpar + Recalcular" que executa ambas as operações em sequência (um único clique)
+- Mostrar contagem de dias únicos nos cards ("6 dias únicos" em vez de "7 notas")
+- Adicionar Realtime subscription para `notes` na página de finanças (igual ao que foi feito em Notes.tsx)
+- Melhorar o card "Total guardado" com tooltip mostrando detalhes
 
 ---
 
-## Arquivos modificados (3 arquivos + 1 deploy)
+## Arquivos a modificar (3 arquivos)
 
 ```
-FIX  supabase/functions/process-message/index.ts
-       — Fix crítico: ao criar nota de reserva, recalcular total do mês por COUNT de notas
-         (não usar soma acumulativa em user_memory que pode dessincronizar)
-       — Fix: no path skipInsert=true, ler total_guardado_mes = COUNT * meta_diaria
-       — Fix: usar meta_diaria do userMemory (dinâmico) não 40.00 hardcoded
-       — Fix system prompt: instrução explícita para conteúdo de nota reserva ser
-         APENAS "• Reserva Diária: R$ {valor},00" sem linhas de ajuste/cálculo
-       — Deploy automático
+FIX  src/features/finance/services/finance.service.ts
+       — recalcularTotalGuardado: deduplicate por dia (não por nota)
+         Uma nota por dia → total correto sem contar duplicatas
+       — getReservasMes: deduplicate por dia antes de retornar ReservaEntry[]
+         Resultado: 6 entradas únicas em vez de 7 com duplicatas
 
-FIX  src/features/finance/components/MetaDiariaProgress.tsx
-       — Wrap com React.forwardRef (resolve console error Radix ref)
-
-FIX  src/features/finance/components/WhatsAppStyleReport.tsx
-       — Wrap com React.forwardRef (resolve console error Radix ref)
+FIX  src/features/finance/hooks/useReservasMensais.ts
+       — staleTime: 0 (sempre frescos)
 
 FIX  src/features/finance/pages/FinanceDashboard.tsx
-       — Botão "Recalcular" dispara recalcularTotalGuardado que sincroniza
-         user_memory com as notas reais do banco (corrigi o R$ 40 → R$ 80)
-       — Adicionar botão "Registrar reserva manual" com date picker para
-         o usuário recuperar os dias que o bot não registrou
+       — useEffect ao montar: dispara recalcularTotalGuardado em background
+         e invalida queries → dashboard atualiza sem precisar clicar no botão
+       — Adicionar Realtime subscription para tabela notes (filtro Financeiro)
+         → qualquer nova nota de reserva reflete instantaneamente
+       — Botão combo "Limpar + Recalcular" em um único passo
+       — Melhor UX: mostrar "X dias guardados" em vez de "X nota(s)"
 ```
 
-### Resultado esperado após as correções
-- Dashboard: R$ 80 (2 notas × R$ 40 reais no banco) após clicar Recalcular
-- Próxima reserva via WhatsApp: total calculado por COUNT real, não por acúmulo
-- Console: zero erros de ref
-- Sistema prompt: AI não vai mais adicionar linhas "Ajuste de Reserva: R$ 120,00" que poluíam as notas
-- Botão manual: Paulo pode registrar retroativamente os 4 dias que faltam (17/03, 18/03, 19/03, 20/03) para chegar nos R$ 240 reais
+### Resultado esperado
+- Dashboard ao abrir: calcula automaticamente R$ 240 (6 dias × R$ 40), sem clicar em nada
+- Card "Total guardado": R$ 240,00 ✅ Meta ok
+- Card "Só reservas": R$ 240,00 — 6 dias únicos
+- Progresso: 19% (R$ 240 ÷ R$ 1.240 meta mensal)
+- Qualquer nova reserva via WhatsApp aparece em segundos na tela
