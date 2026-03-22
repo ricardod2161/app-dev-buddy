@@ -1008,8 +1008,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
       const isFinancial = normalizeFinancialCategory(fnArgs.category) || hasFinancialContent(`${fnArgs.title} ${fnArgs.content}`)
       const finalCategory = isFinancial ? 'Financeiro' : (fnArgs.category ?? 'Geral')
       const isReserva = /reserva|guardei|guardando/i.test(`${fnArgs.title} ${fnArgs.content}`)
+      let skipInsert = false
 
-      // ── Anti-duplicate: if reserva note already exists TODAY, update instead of create ──
+      // ── Anti-duplicate: if reserva note already exists TODAY, skip creation ──
       if (isReserva) {
         const { data: todayReservaNote } = await supabase
           .from('notes')
@@ -1022,10 +1023,9 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
           .limit(1)
 
         if (todayReservaNote?.length) {
-          // Already have a reserva note today — just confirm, don't create duplicate
+          skipInsert = true
           const existingNote = todayReservaNote[0]
-          console.log(`[Finance] Reserva already exists today (${existingNote.title}) — confirming without duplicate`)
-          // Update user_memory to ensure it's current
+          console.log(`[Finance] Reserva already exists today (${existingNote.title}) — skipping duplicate creation`)
           const mesMesAtual = now.toISOString().slice(0, 7)
           const { data: existingMem } = await supabase
             .from('user_memory')
@@ -1034,90 +1034,85 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
             .maybeSingle()
           const currentTotal = existingMem?.mes_referencia === mesMesAtual
             ? Number(existingMem?.total_guardado_mes ?? 0)
-            : 40 // at least today's note
-          const totalFmt = currentTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-          replyText = `✅ Reserva de R$ 40,00 já registrada hoje (${existingNote.title})!\n\nTotal guardado este mês: ${totalFmt} 🎯\n\nQuer filtro só reservas? Relatório completo? Só falar.`
-          // skip note insertion
-          goto_send_reply: {
-            break goto_send_reply
-          }
+            : 40
+          const totalFmt = formatCurrency(currentTotal)
+          replyText = `✅ Reserva de R$ 40,00 já registrada hoje!\n\nTotal guardado este mês: ${totalFmt} 🎯\n\nQuer filtro só reservas? Relatório completo? Só falar.`
         }
       }
 
-      const { error: noteErr } = await supabase.from('notes').insert({
-        workspace_id,
-        title: fnArgs.title,
-        content: fnArgs.content,
-        category: finalCategory,
-        tags: fnArgs.tags ?? [],
-        source_message_id: null,
-      })
-      if (noteErr) console.error('Failed to insert note:', noteErr)
+      if (!skipInsert) {
+        const { error: noteErr } = await supabase.from('notes').insert({
+          workspace_id,
+          title: fnArgs.title,
+          content: fnArgs.content,
+          category: finalCategory,
+          tags: fnArgs.tags ?? [],
+          source_message_id: null,
+        })
+        if (noteErr) console.error('Failed to insert note:', noteErr)
 
-      if (isFinancial) {
-        // ── FIX: For reserva notes, ALWAYS use R$ 40 (meta diária).
-        // NEVER sum all values in content — content may have adjustment/confirmation lines.
-        // For non-reserva financial notes, extract first monetary value.
-        let reservaValue: number
-        if (isReserva) {
-          // Reserva diária = sempre R$ 40 (meta fixa do Paulo)
-          reservaValue = 40
-        } else {
-          // Non-reserva: extract first R$ value from content only (not title)
-          const firstMatch = (fnArgs.content as string ?? '').match(/R\$\s*([\d]+(?:[.,]\d{1,2})?)/)
-          reservaValue = firstMatch ? parseFloat(firstMatch[1].replace(',', '.')) : 0
-        }
-
-        const mesMesAtual = now.toISOString().slice(0, 7) // "2026-03"
-        const totalFmt = reservaValue > 0 ? formatCurrency(reservaValue) : ''
-        const totalStr = reservaValue > 0 ? ` (total dia: ${totalFmt})` : ''
-        replyText = fnArgs.reply_message
-          ? fnArgs.reply_message.replace(/\.$/, '') + totalStr + (totalStr ? '.' : '')
-          : `✅ ${isReserva ? 'Reserva' : 'Gasto'} registrado: ${fnArgs.title}${totalStr}`
-
-        // ── Safe upsert user_memory using onConflict ──────────────────────
-        if (reservaValue > 0) {
-          try {
-            // Fetch current memory to compute new total
-            const { data: existingMem } = await supabase
-              .from('user_memory')
-              .select('total_guardado_mes, mes_referencia')
-              .eq('workspace_id', workspace_id)
-              .maybeSingle()
-
-            // Reset total when month changes
-            const currentTotal = existingMem?.mes_referencia === mesMesAtual
-              ? Number(existingMem?.total_guardado_mes ?? 0) + reservaValue
-              : reservaValue
-
-            const { error: memErr } = await supabase
-              .from('user_memory')
-              .upsert(
-                {
-                  workspace_id,
-                  meta_diaria: 40.00,
-                  total_guardado_mes: currentTotal,
-                  mes_referencia: mesMesAtual,
-                  ...(isReserva ? {
-                    ultima_reserva_data: now.toISOString().slice(0, 10),
-                    ultima_reserva_valor: reservaValue,
-                  } : {}),
-                },
-                { onConflict: 'workspace_id' }
-              )
-            if (memErr) console.warn('[Memory] upsert failed:', memErr)
-            else {
-              const totalMesFmt = formatCurrency(currentTotal)
-              // Append total-do-mês to the reply so Paulo sees the running total
-              if (isReserva) {
-                replyText = `✅ Reserva registrada! R$ 40,00 adicionados à sua meta diária.\n\nTotal guardado este mês: ${totalMesFmt} 💰\n\nQuer filtro só reservas? Gráfico? PDF? Só falar, mano!`
-              }
-            }
-          } catch (memErr) {
-            console.warn('[Memory] Failed to upsert user_memory:', memErr)
+        if (isFinancial) {
+          // ── FIX: For reserva notes, ALWAYS use R$ 40 (meta diária = valor fixo).
+          // NEVER sum all values in content — content may have adjustment/confirmation lines
+          // that re-state the same R$ 40 in different ways ("Para totalizar R$ 40,00", etc.)
+          // For non-reserva financial notes, extract first monetary value only.
+          let reservaValue: number
+          if (isReserva) {
+            reservaValue = 40 // meta diária fixa do Paulo
+          } else {
+            const firstMatch = (fnArgs.content as string ?? '').match(/R\$\s*([\d]+(?:[.,]\d{1,2})?)/)
+            reservaValue = firstMatch ? parseFloat(firstMatch[1].replace(',', '.')) : 0
           }
-        }
-      } else {
+
+          const mesMesAtual = now.toISOString().slice(0, 7)
+
+          // ── Safe upsert user_memory ──────────────────────────────────────
+          if (reservaValue > 0) {
+            try {
+              const { data: existingMem } = await supabase
+                .from('user_memory')
+                .select('total_guardado_mes, mes_referencia')
+                .eq('workspace_id', workspace_id)
+                .maybeSingle()
+
+              // Reset total when month changes
+              const currentTotal = existingMem?.mes_referencia === mesMesAtual
+                ? Number(existingMem?.total_guardado_mes ?? 0) + reservaValue
+                : reservaValue
+
+              const { error: memErr } = await supabase
+                .from('user_memory')
+                .upsert(
+                  {
+                    workspace_id,
+                    meta_diaria: 40.00,
+                    total_guardado_mes: currentTotal,
+                    mes_referencia: mesMesAtual,
+                    ...(isReserva ? {
+                      ultima_reserva_data: now.toISOString().slice(0, 10),
+                      ultima_reserva_valor: reservaValue,
+                    } : {}),
+                  },
+                  { onConflict: 'workspace_id' }
+                )
+
+              const totalMesFmt = formatCurrency(currentTotal)
+              if (memErr) {
+                console.warn('[Memory] upsert failed:', memErr)
+                replyText = fnArgs.reply_message ?? `✅ ${isReserva ? 'Reserva' : 'Gasto'} registrado: ${fnArgs.title}`
+              } else if (isReserva) {
+                replyText = `✅ Reserva registrada! R$ 40,00 adicionados à sua meta diária.\n\nTotal guardado este mês: ${totalMesFmt} 💰\n\nQuer filtro só reservas? Gráfico? PDF? Só falar, mano!`
+              } else {
+                replyText = fnArgs.reply_message ?? `✅ Gasto registrado: ${fnArgs.title} (${formatCurrency(reservaValue)})`
+              }
+            } catch (memErr) {
+              console.warn('[Memory] Failed to upsert user_memory:', memErr)
+              replyText = fnArgs.reply_message ?? `✅ ${isReserva ? 'Reserva' : 'Gasto'} registrado: ${fnArgs.title}`
+            }
+          } else {
+            replyText = fnArgs.reply_message ?? `✅ Nota financeira criada: ${fnArgs.title}`
+          }
+        } else {
         replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
       }
     } else if (fnName === 'update_note') {
