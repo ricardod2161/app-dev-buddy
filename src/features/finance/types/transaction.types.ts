@@ -47,3 +47,11 @@ export interface FinanceMonthSummary {
   progresso_pct: number
   mes_label: string    // "Março 2026"
 }
+
+export interface MesHistorico {
+  mes: string        // 'YYYY-MM'
+  mesLabel: string   // 'Mar/26'
+  total: number
+  meta: number
+  cumprida: boolean
+}

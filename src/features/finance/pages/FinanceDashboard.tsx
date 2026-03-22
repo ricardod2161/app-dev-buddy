@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -6,12 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, Calendar, RefreshCw } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, BarChart2 } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservaParser } from '../hooks/useReservaParser'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
-import { GastoList } from '../components/GastoList'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
 import { useQueryClient } from '@tanstack/react-query'
@@ -32,6 +32,7 @@ const FinanceDashboard: React.FC = () => {
   const metaMensal = totalData?.meta_mensal ?? metaDiaria * 30
   const progresso = totalData?.progresso_pct ?? 0
   const metaDiariaCumprida = totalGuardado >= metaDiaria
+  const totalHoje = gastosHoje.reduce((s, g) => s + g.valor, 0)
 
   const handleRefresh = () => {
     qc.invalidateQueries({ queryKey: ['finance-gastos-mes', workspaceId] })
@@ -58,50 +59,55 @@ const FinanceDashboard: React.FC = () => {
             <p className="text-xs text-muted-foreground mt-0.5">Buddy Financeiro — Paulo</p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={handleRefresh} className="h-8 w-8">
-          <RefreshCw className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" asChild className="h-8 w-8">
+            <Link to="/app/finance/history">
+              <BarChart2 className="w-4 h-4" />
+            </Link>
+          </Button>
+          <Button variant="ghost" size="icon" onClick={handleRefresh} className="h-8 w-8">
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Summary cards row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Card>
-          <CardContent className="pt-4 pb-3 px-4">
-            <p className="text-xs text-muted-foreground">Total guardado</p>
+          <CardContent className="pt-3 pb-3 px-3">
+            <p className="text-[11px] text-muted-foreground leading-tight">Total guardado</p>
             {isLoading ? (
-              <Skeleton className="h-6 w-24 mt-1" />
+              <Skeleton className="h-6 w-20 mt-1" />
             ) : (
-              <p className="text-lg font-bold text-primary">{formatBRL(totalGuardado)}</p>
+              <p className="text-base font-bold text-primary leading-tight mt-0.5">{formatBRL(totalGuardado)}</p>
             )}
-            <Badge variant="outline" className="text-[10px] mt-1">
-              {metaDiariaCumprida ? '✅ Meta cumprida' : '⏳ Em andamento'}
+            <Badge variant="outline" className="text-[9px] mt-1 px-1.5 h-4">
+              {metaDiariaCumprida ? '✅ Meta ok' : '⏳ Em andamento'}
             </Badge>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="pt-4 pb-3 px-4">
-            <p className="text-xs text-muted-foreground">Só reservas</p>
-            {isLoading ? (
-              <Skeleton className="h-6 w-20 mt-1" />
-            ) : (
-              <p className="text-lg font-bold">{formatBRL(totalReservas)}</p>
-            )}
-            <p className="text-[10px] text-muted-foreground mt-1">{reservas.length} registro(s)</p>
-          </CardContent>
-        </Card>
-
-        <Card className="col-span-2 sm:col-span-1">
-          <CardContent className="pt-4 pb-3 px-4">
-            <p className="text-xs text-muted-foreground">Gastos hoje</p>
+          <CardContent className="pt-3 pb-3 px-3">
+            <p className="text-[11px] text-muted-foreground leading-tight">Só reservas</p>
             {isLoading ? (
               <Skeleton className="h-6 w-16 mt-1" />
             ) : (
-              <p className="text-lg font-bold">
-                {formatBRL(gastosHoje.reduce((s, g) => s + g.valor, 0))}
-              </p>
+              <p className="text-base font-bold leading-tight mt-0.5">{formatBRL(totalReservas)}</p>
             )}
-            <p className="text-[10px] text-muted-foreground mt-1">{gastosHoje.length} lançamento(s)</p>
+            <p className="text-[9px] text-muted-foreground mt-1">{reservas.length} item(s)</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-3 pb-3 px-3">
+            <p className="text-[11px] text-muted-foreground leading-tight">Hoje</p>
+            {isLoading ? (
+              <Skeleton className="h-6 w-14 mt-1" />
+            ) : (
+              <p className="text-base font-bold leading-tight mt-0.5">{formatBRL(totalHoje)}</p>
+            )}
+            <p className="text-[9px] text-muted-foreground mt-1">{gastosHoje.length} lançamento(s)</p>
           </CardContent>
         </Card>
       </div>
@@ -111,7 +117,7 @@ const FinanceDashboard: React.FC = () => {
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-primary" />
-            Progresso da meta
+            Progresso da meta — {mesAtual}
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
@@ -132,20 +138,14 @@ const FinanceDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Report tabs */}
+      {/* Unified report + list tabs */}
       <Card>
-        <CardHeader className="pb-2 pt-4 px-4">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-primary" />
-            Relatório WhatsApp
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4">
+        <CardContent className="px-4 pb-4 pt-3">
           <Tabs value={reportMode} onValueChange={v => setReportMode(v as typeof reportMode)}>
-            <TabsList className="mb-3 h-8 text-xs">
-              <TabsTrigger value="hoje" className="text-xs px-3">Hoje</TabsTrigger>
-              <TabsTrigger value="mes" className="text-xs px-3">Este mês</TabsTrigger>
-              <TabsTrigger value="reservas" className="text-xs px-3">Reservas</TabsTrigger>
+            <TabsList className="mb-3 h-8 text-xs w-full">
+              <TabsTrigger value="hoje" className="text-xs px-3 flex-1">Hoje</TabsTrigger>
+              <TabsTrigger value="mes" className="text-xs px-3 flex-1">Este mês</TabsTrigger>
+              <TabsTrigger value="reservas" className="text-xs px-3 flex-1">Reservas</TabsTrigger>
             </TabsList>
 
             <TabsContent value="hoje">
@@ -153,7 +153,7 @@ const FinanceDashboard: React.FC = () => {
                 <WhatsAppStyleReport
                   mode="hoje"
                   gastos={gastosHoje}
-                  totalGuardado={gastosHoje.reduce((s, g) => s + g.valor, 0)}
+                  totalGuardado={totalHoje}
                 />
               )}
             </TabsContent>
@@ -182,26 +182,13 @@ const FinanceDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Detailed gasto list */}
-      <Card>
-        <CardHeader className="pb-2 pt-4 px-4">
-          <CardTitle className="text-sm">Lançamentos do mês</CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4">
-          {isLoading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map(i => <Skeleton key={i} className="h-5 w-full" />)}
-            </div>
-          ) : (
-            <GastoList
-              gastos={gastosMes}
-              title="Gastos — Este mês"
-              totalLabel="Total guardado este mês"
-              emptyMessage="Nenhum lançamento financeiro encontrado. Envie uma mensagem ao ZYNTRA para registrar gastos!"
-            />
-          )}
-        </CardContent>
-      </Card>
+      {/* Footer link to history */}
+      <Button variant="outline" className="w-full text-xs h-9" asChild>
+        <Link to="/app/finance/history">
+          <BarChart2 className="w-3.5 h-3.5 mr-2" />
+          Ver histórico anual completo
+        </Link>
+      </Button>
     </div>
   )
 }

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, FileText, CheckSquare, BarChart3, MessageSquare,
   Settings, List, Hash, ScrollText, ChevronLeft, ChevronRight,
-  MessageCircle, X, Bell, Users, Sparkles, Wallet,
+  MessageCircle, X, Bell, Users, Sparkles, Wallet, TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -32,6 +32,7 @@ const navGroups: NavGroup[] = [
       { label: 'Lembretes', path: '/app/reminders', icon: Bell },
       { label: 'Chat IA', path: '/app/ai-chat', icon: Sparkles },
       { label: 'Minhas Finanças', path: '/app/finance', icon: Wallet },
+      { label: 'Histórico Financeiro', path: '/app/finance/history', icon: TrendingUp },
     ],
   },
   {
