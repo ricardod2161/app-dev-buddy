@@ -7,19 +7,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
-import { Wallet, TrendingUp, RefreshCw, BarChart2 } from 'lucide-react'
+import { Wallet, TrendingUp, RefreshCw, BarChart2, Sparkles, CheckCircle2 } from 'lucide-react'
 import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservaParser } from '../hooks/useReservaParser'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
+import { cleanDuplicateReservas, type CleanupResult } from '../services/finance.service'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 const FinanceDashboard: React.FC = () => {
   const { workspaceId } = useAuth()
   const qc = useQueryClient()
   const [reportMode, setReportMode] = useState<'hoje' | 'mes' | 'reservas'>('mes')
+  const [cleaning, setCleaning] = useState(false)
+  const [lastCleanup, setLastCleanup] = useState<CleanupResult | null>(null)
 
   const { data: gastosMes = [], isLoading: loadingMes } = useGastosMensais(workspaceId)
   const { data: gastosHoje = [], isLoading: loadingHoje } = useGastosHoje(workspaceId)
@@ -34,10 +38,34 @@ const FinanceDashboard: React.FC = () => {
   const metaDiariaCumprida = totalGuardado >= metaDiaria
   const totalHoje = gastosHoje.reduce((s, g) => s + g.valor, 0)
 
-  const handleRefresh = () => {
+  const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ['finance-gastos-mes', workspaceId] })
     qc.invalidateQueries({ queryKey: ['finance-gastos-hoje', workspaceId] })
     qc.invalidateQueries({ queryKey: ['finance-memory', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['finance-historico-mensal', workspaceId] })
+  }
+
+  const handleClean = async () => {
+    if (!workspaceId) return
+    setCleaning(true)
+    setLastCleanup(null)
+    try {
+      const result = await cleanDuplicateReservas(workspaceId)
+      setLastCleanup(result)
+      const total = result.notesFixed + result.notesMerged
+      if (total === 0) {
+        toast.success('Nenhuma duplicata encontrada — notas já estão limpas ✅')
+      } else {
+        toast.success(
+          `Limpeza concluída: ${result.notesFixed} nota(s) corrigida(s), ${result.notesMerged} mesclada(s)`,
+        )
+        invalidateAll()
+      }
+    } catch (err) {
+      toast.error('Erro na limpeza: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setCleaning(false)
+    }
   }
 
   if (!workspaceId) {
@@ -48,7 +76,8 @@ const FinanceDashboard: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6 max-w-4xl mx-auto">
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -60,18 +89,44 @@ const FinanceDashboard: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Limpar notas duplicadas"
+            onClick={handleClean}
+            disabled={cleaning}
+          >
+            {cleaning
+              ? <RefreshCw className="w-4 h-4 animate-spin" />
+              : <Sparkles className="w-4 h-4" />
+            }
+          </Button>
           <Button variant="ghost" size="icon" asChild className="h-8 w-8">
             <Link to="/app/finance/history">
               <BarChart2 className="w-4 h-4" />
             </Link>
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleRefresh} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={invalidateAll} className="h-8 w-8">
             <RefreshCw className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
-      {/* Summary cards row */}
+      {/* ── Cleanup result banner ── */}
+      {lastCleanup && (lastCleanup.notesFixed > 0 || lastCleanup.notesMerged > 0) && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
+          <div className="flex items-center gap-1.5 font-semibold text-primary">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Limpeza concluída
+          </div>
+          {lastCleanup.details.map((d, i) => (
+            <p key={i} className="text-muted-foreground pl-5">• {d}</p>
+          ))}
+        </div>
+      )}
+
+      {/* ── Summary cards ── */}
       <div className="grid grid-cols-3 gap-3">
         <Card>
           <CardContent className="pt-3 pb-3 px-3">
@@ -112,7 +167,7 @@ const FinanceDashboard: React.FC = () => {
         </Card>
       </div>
 
-      {/* Progress card */}
+      {/* ── Progress card ── */}
       <Card>
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -138,7 +193,7 @@ const FinanceDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Unified report + list tabs */}
+      {/* ── Report tabs ── */}
       <Card>
         <CardContent className="px-4 pb-4 pt-3">
           <Tabs value={reportMode} onValueChange={v => setReportMode(v as typeof reportMode)}>
@@ -150,11 +205,7 @@ const FinanceDashboard: React.FC = () => {
 
             <TabsContent value="hoje">
               {isLoading ? <Skeleton className="h-24 w-full" /> : (
-                <WhatsAppStyleReport
-                  mode="hoje"
-                  gastos={gastosHoje}
-                  totalGuardado={totalHoje}
-                />
+                <WhatsAppStyleReport mode="hoje" gastos={gastosHoje} totalGuardado={totalHoje} />
               )}
             </TabsContent>
 
@@ -171,18 +222,14 @@ const FinanceDashboard: React.FC = () => {
 
             <TabsContent value="reservas">
               {isLoading ? <Skeleton className="h-40 w-full" /> : (
-                <WhatsAppStyleReport
-                  mode="reservas"
-                  reservas={reservas}
-                  totalGuardado={totalReservas}
-                />
+                <WhatsAppStyleReport mode="reservas" reservas={reservas} totalGuardado={totalReservas} />
               )}
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
 
-      {/* Footer link to history */}
+      {/* ── Footer ── */}
       <Button variant="outline" className="w-full text-xs h-9" asChild>
         <Link to="/app/finance/history">
           <BarChart2 className="w-3.5 h-3.5 mr-2" />
