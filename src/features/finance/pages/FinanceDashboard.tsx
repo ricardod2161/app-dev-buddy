@@ -105,6 +105,36 @@ const FinanceDashboard: React.FC = () => {
     }
   }
 
+  const handleManualReserva = async (dates: string[], valor: number) => {
+    if (!workspaceId) return
+    let created = 0
+    for (const dateIso of dates) {
+      const [y, m, d] = dateIso.split('-')
+      const label = `${d}/${m}`
+      const { error } = await supabase.from('notes').insert({
+        workspace_id: workspaceId,
+        title: `Gasto com Reserva (${label})`,
+        content: `• Reserva Diária (Meta Anual): R$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        category: 'Financeiro',
+        tags: [],
+        created_at: new Date(`${dateIso}T12:00:00`).toISOString(),
+      })
+      if (!error) created++
+      else console.error('Erro ao inserir reserva manual:', error)
+    }
+    if (created > 0) {
+      toast.success(`${created} reserva(s) registrada(s) com sucesso!`)
+      // Recalculate total from real notes
+      try {
+        const { total } = await recalcularTotalGuardado(workspaceId)
+        toast.success(`Total atualizado: ${formatBRL(total)}`)
+      } catch { /* non-critical */ }
+      invalidateAll()
+    } else {
+      toast.error('Não foi possível registrar as reservas')
+    }
+  }
+
   if (!workspaceId) {
     return <EmptyState title="Sem workspace" description="Faça login para acessar suas finanças." icon={Wallet} />
   }
