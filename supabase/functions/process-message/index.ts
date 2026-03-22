@@ -1024,6 +1024,46 @@ ${botPersonality ? `\n## Personalidade Personalizada\n${botPersonality}` : ''}`
         replyText = fnArgs.reply_message
           ? fnArgs.reply_message.replace(/\.$/, '') + totalStr + (totalStr ? '.' : '')
           : `✅ Gasto registrado: ${fnArgs.title}${totalStr}`
+
+        // ── Upsert user_memory when a financial/reserva note is created ──────
+        if (fin.total > 0) {
+          try {
+            const isReserva = /reserva|guardei|guardando/i.test(`${fnArgs.title} ${fnArgs.content}`)
+            const mesMesAtual = now.toISOString().slice(0, 7) // "2026-03"
+            const { data: existingMem } = await supabase
+              .from('user_memory')
+              .select('id, total_guardado_mes, mes_referencia')
+              .eq('workspace_id', workspace_id)
+              .maybeSingle()
+
+            if (existingMem) {
+              // Reset if month changed
+              const currentTotal = existingMem.mes_referencia === mesMesAtual
+                ? Number(existingMem.total_guardado_mes ?? 0) + fin.total
+                : fin.total
+              await supabase
+                .from('user_memory')
+                .update({
+                  total_guardado_mes: currentTotal,
+                  ...(isReserva ? { ultima_reserva_data: now.toISOString().slice(0, 10), ultima_reserva_valor: fin.total } : {}),
+                  mes_referencia: mesMesAtual,
+                })
+                .eq('workspace_id', workspace_id)
+            } else {
+              await supabase
+                .from('user_memory')
+                .insert({
+                  workspace_id,
+                  meta_diaria: 40.00,
+                  total_guardado_mes: fin.total,
+                  ...(isReserva ? { ultima_reserva_data: now.toISOString().slice(0, 10), ultima_reserva_valor: fin.total } : {}),
+                  mes_referencia: mesMesAtual,
+                })
+            }
+          } catch (memErr) {
+            console.warn('[Memory] Failed to upsert user_memory:', memErr)
+          }
+        }
       } else {
         replyText = fnArgs.reply_message ?? `✅ Nota criada: ${fnArgs.title}`
       }
