@@ -149,23 +149,28 @@ Use "**Raciocínio:**" para mostrar seu processo de pensamento antes da resposta
       try {
         const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-        const [notesResult, tasksResult, wsResult] = await Promise.all([
+        const [notesResult, tasksResult, wsResult, memoryResult] = await Promise.all([
           sb
             .from("notes")
             .select("title, content, category, created_at")
             .eq("workspace_id", workspace_id)
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(15),
           sb
             .from("tasks")
             .select("title, status, priority, due_at, project")
             .eq("workspace_id", workspace_id)
             .in("status", ["todo", "doing"])
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(10),
           sb
             .from("workspace_settings")
             .select("bot_name, bot_personality, timezone")
+            .eq("workspace_id", workspace_id)
+            .single(),
+          sb
+            .from("user_memory")
+            .select("meta_diaria, total_guardado_mes, ultima_reserva_data, ultima_reserva_valor, mes_referencia")
             .eq("workspace_id", workspace_id)
             .single(),
         ]);
@@ -173,6 +178,28 @@ Use "**Raciocínio:**" para mostrar seu processo de pensamento antes da resposta
         const notes = notesResult.data ?? [];
         const tasks = tasksResult.data ?? [];
         const ws = wsResult.data;
+        const memory = memoryResult.data;
+
+        // Inject financial memory block — always at the top of context
+        if (memory) {
+          const mesAtual = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", month: "long", year: "numeric" });
+          const ultimaReservaStr = memory.ultima_reserva_data
+            ? new Date(memory.ultima_reserva_data).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
+            : "nenhuma ainda";
+          const totalFormatted = Number(memory.total_guardado_mes ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+          const metaFormatted = Number(memory.meta_diaria ?? 40).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+          systemContent += `\n\n## 🧠 MEMÓRIA FINANCEIRA DO PAULO (dados reais do banco):
+- Meta diária: ${metaFormatted}
+- Total guardado este mês (${mesAtual}): ${totalFormatted}
+- Última reserva registrada: ${ultimaReservaStr}${memory.ultima_reserva_valor ? ` — ${Number(memory.ultima_reserva_valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}
+- Use esses valores REAIS ao responder sobre totais, progresso e metas. NUNCA invente valores.`;
+        } else {
+          systemContent += `\n\n## 🧠 MEMÓRIA FINANCEIRA DO PAULO:
+- Meta diária: R$ 40,00
+- Total guardado este mês: R$ 0,00 (nenhum registro ainda)
+- Use esses valores ao responder sobre totais e metas.`;
+        }
 
         if (ws?.bot_personality) {
           systemContent += `\n\nPersonalidade adicional: ${ws.bot_personality}`;
