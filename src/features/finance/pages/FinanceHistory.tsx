@@ -1,62 +1,50 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { EmptyState } from '@/components/EmptyState'
-import { ArrowLeft, TrendingUp, Target, Calendar, Info } from 'lucide-react'
+import { ArrowLeft, TrendingUp, Target, Calendar, Info, Pencil } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts'
 import { useHistoricoMensal } from '../hooks/useHistoricoMensal'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
+import { EditMetaDialog } from '../components/EditMetaDialog'
+import { upsertFinanceMemory } from '../services/finance.service'
 import { formatBRL } from '../lib/parse-finance'
+import { toast } from 'sonner'
 import type { MesHistorico } from '../hooks/useHistoricoMensal'
-
-// R$ 40/dia × 365 dias
-const META_ANUAL = 40 * 365  // R$ 14.600
-
-/** Calculates actual days in a given YYYY-MM month key */
-function daysInMonth(mesKey: string): number {
-  const [year, month] = mesKey.split('-').map(Number)
-  return new Date(year!, month!, 0).getDate()
-}
-
-/** Returns the META_MENSAL for a given month key (R$ 40 × actual days) */
-function metaMensalForKey(mesKey: string): number {
-  return 40 * daysInMonth(mesKey)
-}
 
 interface TooltipProps {
   active?: boolean
   payload?: { value: number }[]
   label?: string
-  mesKey?: string
+  metaDiaria?: number
+  diasNoMes?: number
 }
 
-// Defined outside component, no forwardRef needed — recharts only needs a function component
-const CustomTooltip: React.FC<TooltipProps> = ({ active, payload, label }) => {
+const CustomTooltip: React.FC<TooltipProps> = ({ active, payload, label, metaDiaria = 40, diasNoMes = 30 }) => {
   if (!active || !payload?.length) return null
   const value = payload[0].value
-  // We don't have mesKey here so use a neutral 30-day approximation for tooltip
-  const metaMensal = 40 * 30
+  const metaMensal = metaDiaria * diasNoMes
   const pct = metaMensal > 0 ? Math.min(100, (value / metaMensal) * 100) : 0
   return (
     <div className="rounded-lg border bg-popover p-3 shadow-md text-sm space-y-1">
       <p className="font-semibold text-foreground">{label}</p>
       <p className="text-primary font-mono">{formatBRL(value)}</p>
       <p className="text-muted-foreground text-xs">
-        ≈ {pct.toFixed(0)}% da meta mensal
+        ≈ {pct.toFixed(0)}% da meta mensal ({formatBRL(metaMensal)})
       </p>
     </div>
   )
 }
 
-/* ─── Month row in the table ─── */
 const statusIcon = (total: number, cumprida: boolean) => {
   if (total === 0) return <span title="Sem registro">🔴</span>
   if (cumprida) return <span title="Meta cumprida">✅</span>
@@ -65,20 +53,45 @@ const statusIcon = (total: number, cumprida: boolean) => {
 
 const FinanceHistory: React.FC = () => {
   const { workspaceId } = useAuth()
-  const { data: historico = [], isLoading } = useHistoricoMensal(workspaceId)
-  const { data: totalData } = useTotalGuardado(workspaceId)
+  const qc = useQueryClient()
+  const [editingMeta, setEditingMeta] = useState(false)
 
-  // Sum only months with actual data
+  const { data: totalData } = useTotalGuardado(workspaceId)
+  const metaDiaria = totalData?.memory?.meta_diaria ?? 40
+  const diasNoMes = totalData?.dias_no_mes ?? 30
+
+  // Pass metaDiaria to the hook so the chart + table use the current dynamic value
+  const { data: historico = [], isLoading } = useHistoricoMensal(workspaceId, metaDiaria)
+
+  // Dynamic annual goal based on current meta_diaria
+  const META_ANUAL = metaDiaria * 365
+
+  // Compute reference line value for the current month
+  const now = new Date()
+  const currentMonthDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const metaMensalAtual = metaDiaria * currentMonthDays
+
+  const mesAtualLabel = (() => {
+    const meses_pt = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+    return `${meses_pt[now.getMonth()]}/${String(now.getFullYear()).slice(2)}`
+  })()
+
   const totalAcumulado = historico.reduce((s, m) => s + m.total, 0)
   const progressoAnual = Math.min((totalAcumulado / META_ANUAL) * 100, 100)
-  const metaDiaria = totalData?.memory?.meta_diaria ?? 40
 
-  // Stats
   const mesesComDado = historico.filter(m => m.total > 0).length
   const melhorMes = historico.reduce(
     (best, m) => m.total > (best?.total ?? 0) ? m : best,
     null as MesHistorico | null
   )
+
+  const handleSaveMeta = async (newMeta: number) => {
+    if (!workspaceId) return
+    await upsertFinanceMemory(workspaceId, { meta_diaria: newMeta })
+    toast.success(`Meta diária atualizada: ${formatBRL(newMeta)}/dia`)
+    qc.invalidateQueries({ queryKey: ['finance-memory', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['finance-historico-mensal', workspaceId] })
+  }
 
   if (!workspaceId) {
     return (
@@ -90,7 +103,6 @@ const FinanceHistory: React.FC = () => {
     )
   }
 
-  // Bar color: primary for goal met, primary/50 for in-progress, muted for empty
   const barColor = (entry: MesHistorico) => {
     if (entry.total === 0) return 'hsl(var(--muted-foreground) / 0.2)'
     if (entry.cumprida) return 'hsl(var(--primary))'
@@ -132,9 +144,20 @@ const FinanceHistory: React.FC = () => {
           <div className="flex items-center gap-2">
             <Target className="w-4 h-4 text-primary shrink-0" />
             <span className="text-sm font-semibold">Meta Anual</span>
-            <Badge variant="outline" className="ml-auto font-mono text-xs">
-              R$ {metaDiaria}/dia × 365 = {formatBRL(META_ANUAL)}
-            </Badge>
+            {/* Clickable badge to edit meta */}
+            <button
+              onClick={() => setEditingMeta(true)}
+              className="ml-auto flex items-center gap-1.5 group"
+              title="Clique para editar a meta diária"
+            >
+              <Badge
+                variant="outline"
+                className="font-mono text-xs cursor-pointer group-hover:border-primary group-hover:text-primary transition-colors"
+              >
+                {formatBRL(metaDiaria)}/dia × 365 = {formatBRL(META_ANUAL)}
+              </Badge>
+              <Pencil className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
+            </button>
           </div>
           {isLoading ? (
             <Skeleton className="h-3 w-full" />
@@ -208,17 +231,19 @@ const FinanceHistory: React.FC = () => {
                     tickFormatter={(v: number) => `R$${v}`}
                     width={56}
                   />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted) / 0.5)' }} />
-                  {/* Reference line at approximate monthly goal — use current month's days */}
+                  <Tooltip
+                    content={<CustomTooltip metaDiaria={metaDiaria} diasNoMes={diasNoMes} />}
+                    cursor={{ fill: 'hsl(var(--muted) / 0.5)' }}
+                  />
                   <ReferenceLine
-                    y={metaMensalForKey(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`)}
+                    y={metaMensalAtual}
                     stroke="hsl(var(--primary))"
                     strokeDasharray="4 4"
                     strokeOpacity={0.6}
                     label={{
-                      value: 'Meta',
+                      value: `Meta (${formatBRL(metaMensalAtual)})`,
                       position: 'right',
-                      fontSize: 10,
+                      fontSize: 9,
                       fill: 'hsl(var(--primary))',
                     }}
                   />
@@ -229,7 +254,7 @@ const FinanceHistory: React.FC = () => {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-              {/* Legend matching actual bar colors */}
+              {/* Legend */}
               <div className="flex items-center justify-center gap-4 mt-2 text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(var(--primary))' }} />
@@ -277,8 +302,7 @@ const FinanceHistory: React.FC = () => {
                 </thead>
                 <tbody>
                   {[...historico].reverse().map((m) => {
-                    const meta = metaMensalForKey(m.mes)
-                    const pctMes = meta > 0 ? Math.min(100, (m.total / meta) * 100) : 0
+                    const pctMes = m.meta > 0 ? Math.min(100, (m.total / m.meta) * 100) : 0
                     return (
                       <tr key={m.mes} className="border-b border-border/50 last:border-0">
                         <td className="py-2 font-medium">{m.mesLabel}</td>
@@ -286,7 +310,7 @@ const FinanceHistory: React.FC = () => {
                           {m.total === 0 ? '—' : formatBRL(m.total)}
                         </td>
                         <td className="py-2 text-right text-muted-foreground text-xs font-mono">
-                          {formatBRL(meta)}
+                          {formatBRL(m.meta)}
                         </td>
                         <td className="py-2 text-right text-muted-foreground text-xs">
                           {m.total === 0 ? '—' : `${pctMes.toFixed(1)}%`}
@@ -318,6 +342,16 @@ const FinanceHistory: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Edit Meta Dialog ── */}
+      <EditMetaDialog
+        open={editingMeta}
+        onOpenChange={setEditingMeta}
+        currentMeta={metaDiaria}
+        mesLabel={mesAtualLabel}
+        diasNoMes={currentMonthDays}
+        onSave={handleSaveMeta}
+      />
     </div>
   )
 }

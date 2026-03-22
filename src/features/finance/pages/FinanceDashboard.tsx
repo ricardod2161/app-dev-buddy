@@ -12,9 +12,15 @@ import { useGastosMensais, useGastosHoje } from '../hooks/useGastosMensais'
 import { useTotalGuardado } from '../hooks/useTotalGuardado'
 import { useReservasMensais } from '../hooks/useReservasMensais'
 import { MetaDiariaProgress } from '../components/MetaDiariaProgress'
+import { EditMetaDialog } from '../components/EditMetaDialog'
 import { WhatsAppStyleReport } from '../components/WhatsAppStyleReport'
 import { monthLabel, formatBRL } from '../lib/parse-finance'
-import { cleanDuplicateReservas, recalcularTotalGuardado, type CleanupResult } from '../services/finance.service'
+import {
+  cleanDuplicateReservas,
+  recalcularTotalGuardado,
+  upsertFinanceMemory,
+  type CleanupResult,
+} from '../services/finance.service'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
@@ -24,6 +30,7 @@ const FinanceDashboard: React.FC = () => {
   const [reportMode, setReportMode] = useState<'hoje' | 'mes' | 'reservas'>('mes')
   const [cleaning, setCleaning] = useState(false)
   const [recalculating, setRecalculating] = useState(false)
+  const [editingMeta, setEditingMeta] = useState(false)
   const [lastCleanup, setLastCleanup] = useState<CleanupResult | null>(null)
 
   const { data: gastosMes = [], isLoading: loadingMes } = useGastosMensais(workspaceId)
@@ -32,13 +39,13 @@ const FinanceDashboard: React.FC = () => {
   const { reservas, totalReservas, isLoading: loadingReservas } = useReservasMensais(workspaceId)
 
   const metaDiaria = totalData?.memory?.meta_diaria ?? 40
+  const diasNoMes = totalData?.dias_no_mes ?? 30
 
   // Total guardado vem diretamente das notas de reserva (parser correto: R$40/nota)
-  // Fallback para user_memory apenas se não houver notas no mês ainda
   const totalGuardado = totalReservas > 0 ? totalReservas : (totalData?.memory?.total_guardado_mes ?? 0)
 
   const mesAtual = monthLabel(totalData?.memory?.mes_referencia)
-  const metaMensal = totalData?.meta_mensal ?? metaDiaria * 30
+  const metaMensal = totalData?.meta_mensal ?? metaDiaria * diasNoMes
   const progresso = metaMensal > 0 ? Math.min(100, (totalGuardado / metaMensal) * 100) : 0
   const metaDiariaCumprida = totalGuardado >= metaDiaria
   const totalHoje = gastosHoje.reduce((s, g) => s + g.valor, 0)
@@ -49,6 +56,13 @@ const FinanceDashboard: React.FC = () => {
     qc.invalidateQueries({ queryKey: ['finance-memory', workspaceId] })
     qc.invalidateQueries({ queryKey: ['finance-historico-mensal', workspaceId] })
     qc.invalidateQueries({ queryKey: ['finance-reservas-mes', workspaceId] })
+  }
+
+  const handleSaveMeta = async (newMeta: number) => {
+    if (!workspaceId) return
+    await upsertFinanceMemory(workspaceId, { meta_diaria: newMeta })
+    toast.success(`Meta diária atualizada: ${formatBRL(newMeta)}/dia`)
+    invalidateAll()
   }
 
   const handleClean = async () => {
@@ -221,6 +235,7 @@ const FinanceDashboard: React.FC = () => {
               metaDiaria={metaDiaria}
               progresso={progresso}
               mesLabel={mesAtual}
+              onEditMeta={() => setEditingMeta(true)}
             />
           )}
         </CardContent>
@@ -269,6 +284,16 @@ const FinanceDashboard: React.FC = () => {
           Ver histórico anual completo
         </Link>
       </Button>
+
+      {/* ── Edit Meta Dialog ── */}
+      <EditMetaDialog
+        open={editingMeta}
+        onOpenChange={setEditingMeta}
+        currentMeta={metaDiaria}
+        mesLabel={mesAtual}
+        diasNoMes={diasNoMes}
+        onSave={handleSaveMeta}
+      />
     </div>
   )
 }
