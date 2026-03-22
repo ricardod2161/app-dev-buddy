@@ -1,144 +1,97 @@
 
-## Honest assessment
+## Diagnóstico
 
-The codebase is a **working, feature-complete app**. The refactoring request is massive (full feature-folder migration) but the goal is real: files are too large (AIChat 1234 lines, Dashboard 636 lines), logic is mixed with UI, and the AI Chat sidebar doesn't work well on mobile.
+### O que o usuário quer
+Configurar o assistente IA (ZYNTRA) com a persona completa do "Buddy Financeiro Pessoal do Paulo" — com tom nordestino-carioca, formatação obrigatória exata (✅, "Gastos — Hoje", bullets •, datas DD/MM), memória de metas financeiras e regras rígidas de resposta.
 
-### What I will actually build (high-value, low-risk)
+### Onde isso precisa entrar
+Dois pontos independentes no sistema:
 
-**The golden rule**: do NOT break what works. Extract, don't rewrite.
+1. **`supabase/functions/ai-chat/index.ts`** — chat web (app, streaming SSE)
+   - Linha 38-76: system prompt do ZYNTRA genérico
+   - Linha 164-169: chamada ao gateway — sem `temperature`, `top_p`, `max_tokens`
 
----
+2. **`supabase/functions/process-message/index.ts`** — bot WhatsApp/Telegram
+   - Linha 443-525: system prompt do WhatsApp — genérico, sem persona do Paulo
+   - Linha 525: onde `botPersonality` é appendado (via workspace_settings)
 
-## Sprint 1 — App Bootstrap & Route Config
+### Abordagem
 
-**`src/app/providers/AppProviders.tsx`** (NEW)
-Consolidate QueryClient, ThemeProvider, AuthProvider, TooltipProvider, Sonner into one composable provider. `App.tsx` becomes clean shell.
-
-**`src/app/router/route-config.ts`** (NEW)
-Central route config array `{ path, title, element, errorTitle }`. Sidebar and TopBar both read from it — titles stop being hardcoded in TopBar's `pageTitles` object.
-
-**`src/App.tsx`** (MOD — simplified, reads from route-config)
-
----
-
-## Sprint 2 — Dashboard decomposition
-
-Extract Dashboard's 636 lines into focused pieces:
-
-**`src/features/dashboard/hooks/useDashboardMetrics.ts`** (NEW)
-All 5 metric queries (notes, tasks, reminders, messages, spend) + AI metrics in one hook. Returns `{ metrics, loading }`.
-
-**`src/features/dashboard/hooks/useDashboardCharts.ts`** (NEW)
-Notes 7-day chart + tasks-by-status queries.
-
-**`src/features/dashboard/hooks/useDashboardRealtime.ts`** (NEW)
-Supabase Realtime channel subscription + query invalidation.
-
-**`src/features/dashboard/components/MetricsGrid.tsx`** (NEW)
-Renders the 6 metric cards + AI card.
-
-**`src/features/dashboard/components/ChartsSection.tsx`** (NEW)
-LineChart + BarChart cards side by side.
-
-**`src/features/dashboard/components/RecentActivity.tsx`** (NEW)
-Recent notes list + recent tasks list in grid.
-
-**`src/pages/app/Dashboard.tsx`** (MOD — becomes ~80 lines, composes the above)
+A persona do Paulo é uma **camada adicional de instrução** acima da lógica base de ações autônomas. Não vou substituir as capacidades existentes (create_note, create_task, etc.) — vou **injetar a persona como prefixo de alta prioridade** em ambos os prompts, garantindo que:
+- O formato de resposta seja sempre o exato das prints (✅, "Gastos — Hoje", bullets •, datas DD/MM)
+- A temperatura/top_p/max_tokens sejam configurados corretamente
+- A memória de meta diária R$40 e contexto do Paulo estejam presentes
+- As ações autônomas de finanças ainda funcionem (create_note com category="Financeiro")
 
 ---
 
-## Sprint 3 — AI Chat decomposition (biggest gain)
+## Plano de implementação
 
-Extract AIChat's 1234 lines into:
+### Arquivo 1: `supabase/functions/ai-chat/index.ts`
 
-**`src/features/ai-chat/lib/parse-actions.ts`** (NEW)
-`parseActionsFromText()` function extracted.
+**Mudança 1 (linhas 38-76):** Substituir o system prompt genérico por uma versão que começa com a persona do Paulo e mantém as capacidades do ZYNTRA.
 
-**`src/features/ai-chat/lib/stream-chat.ts`** (NEW)
-`streamAIChat()` function extracted.
-
-**`src/features/ai-chat/lib/export-markdown.ts`** (NEW)
-`exportConversationMD()` function extracted.
-
-**`src/features/ai-chat/services/action-executor.ts`** (NEW)
-`executeActions()` with Supabase inserts for task/note/reminder. Cleanly separated from UI.
-
-**`src/features/ai-chat/components/MarkdownRenderer.tsx`** (NEW)
-The `renderContent()` function becomes a standalone component. Accepts `content: string`, renders headings/code/lists/blockquotes.
-
-**`src/features/ai-chat/components/MessageBubble.tsx`** (NEW)
-`MessageBubble` component extracted. Uses MarkdownRenderer internally. Contains CopyButton, TTSButton, ActionBadge.
-
-**`src/features/ai-chat/components/ConversationSidebar.tsx`** (NEW)
-Left panel: conversation list, search input, proactive mode toggle, new chat button. Receives props from parent.
-
-**`src/features/ai-chat/components/ChatComposer.tsx`** (NEW)
-Bottom input: Textarea + mic button + send/stop button + disclaimer text.
-
-**`src/features/ai-chat/hooks/useAIChat.ts`** (NEW)
-All chat state: `input`, `isStreaming`, `chatMessages`, `handleSend`, `handleRegenerate`, `handleStop`, `handleExportMD`. Uses stream-chat lib and action-executor service.
-
-**`src/features/ai-chat/hooks/useVoiceInput.ts`** (NEW)
-`toggleListening`, `isListening` state, Web Speech API setup/teardown.
-
-**`src/features/ai-chat/hooks/useProactiveMode.ts`** (NEW)
-`proactiveMode` state (persisted in localStorage), `sessionStorage` guard, Supabase query + auto-trigger logic.
-
-**`src/pages/app/AIChat.tsx`** (MOD — becomes ~120 lines, composes everything)
-
----
-
-## Sprint 4 — Mobile responsiveness for AI Chat
-
-The AI Chat sidebar (conversation list) is invisible on mobile (`w-0`). Fix:
-
-**`src/features/ai-chat/components/ConversationSidebar.tsx`** — on mobile, sidebar becomes a `Sheet` (bottom drawer) triggered by a button. Desktop keeps existing panel behavior.
-
-**`src/pages/app/AIChat.tsx`** — on mobile: `sidebarOpen` state drives a Sheet instead of a side panel. Chat area is full-width on mobile.
-
-Dashboard grid: already has `grid-cols-2` responsive. Add `grid-cols-1 sm:grid-cols-2 xl:grid-cols-6` for better mobile stacking.
-
----
-
-## What I will NOT do
-
-- Full feature folder for all 11 pages — risk of broken imports with no visible benefit
-- Notion slash commands, PWA, Framer Motion — not requested functionality
-- New DB tables for "personal memory" — requires design decisions + migrations
-- Rewrite auth context, Supabase client — auto-generated / working fine
-- Move `shared/`, `types/`, `hooks/` root folders — working, no gain
-
----
-
-## Files summary
-
+O novo system prompt terá esta estrutura:
 ```
-NEW  src/app/providers/AppProviders.tsx
-NEW  src/app/router/route-config.ts
-MOD  src/App.tsx
+## PERSONA — Buddy Financeiro Pessoal do Paulo
+Você é o assistente pessoal de finanças e produtividade de Paulo Ricardo Dantas de Lima,
+amigo de 15 anos, contador expert + dev sênior. Fala como irmão do RN — direto, leve,
+mistura nordestino com carioca. Use "mano", "salvo", "bora", "desculpa a confusão anterior".
 
-NEW  src/features/dashboard/hooks/useDashboardMetrics.ts
-NEW  src/features/dashboard/hooks/useDashboardCharts.ts
-NEW  src/features/dashboard/hooks/useDashboardRealtime.ts
-NEW  src/features/dashboard/components/MetricsGrid.tsx
-NEW  src/features/dashboard/components/ChartsSection.tsx
-NEW  src/features/dashboard/components/RecentActivity.tsx
-MOD  src/pages/app/Dashboard.tsx  (636 → ~80 lines)
+DADOS DO PAULO:
+- Nome: Paulo | Cidade: Alexandria/RN | Meta diária de reserva: R$ 40,00
+- Data atual: [dinâmica] | Última reserva registrada: use o contexto de notas
 
-NEW  src/features/ai-chat/lib/parse-actions.ts
-NEW  src/features/ai-chat/lib/stream-chat.ts
-NEW  src/features/ai-chat/lib/export-markdown.ts
-NEW  src/features/ai-chat/services/action-executor.ts
-NEW  src/features/ai-chat/components/MarkdownRenderer.tsx
-NEW  src/features/ai-chat/components/MessageBubble.tsx
-NEW  src/features/ai-chat/components/ConversationSidebar.tsx
-NEW  src/features/ai-chat/components/ChatComposer.tsx
-NEW  src/features/ai-chat/hooks/useAIChat.ts
-NEW  src/features/ai-chat/hooks/useVoiceInput.ts
-NEW  src/features/ai-chat/hooks/useProactiveMode.ts
-MOD  src/pages/app/AIChat.tsx  (1234 → ~120 lines)
+FORMATO OBRIGATÓRIO (nunca mude o layout):
+[... todas as regras de formato exatas das prints]
+
+EXEMPLOS OBRIGATÓRIOS:
+"E os 40?" → ✅ Reserva registrada! R$ 40,00...
+"Mim der o relatório..." → Gastos — Hoje: • ...
+[etc]
+
+CAPACIDADES ZYNTRA (mantidas):
+[ACTION:create_note|...] para registrar gastos automaticamente
+[ACTION:create_task|...] etc
 ```
 
-**Total: 18 new files, 3 modified. No DB migrations. No new packages.**
+**Mudança 2 (linha 164-169):** Adicionar `temperature: 0.3`, `top_p: 0.85`, `max_tokens: 1200` na chamada ao gateway.
 
-Every new file is an extraction of existing, working code — not a rewrite. The app continues to function identically while becoming dramatically more maintainable.
+---
+
+### Arquivo 2: `supabase/functions/process-message/index.ts`
+
+**Mudança (linhas 443-525):** Injetar a persona do Paulo no início do system prompt do WhatsApp, antes da lógica de capacidades. O tom, os formatos de resposta e os exemplos são idênticos ao ai-chat — o Paulo usa o mesmo assistente tanto no app quanto no WhatsApp.
+
+A injeção fica logo após o cabeçalho `Você é ${botName}...`, adicionando:
+```
+## Buddy Financeiro — Paulo Ricardo (Alexandria/RN)
+Meta diária R$40. Fala como irmão nordestino-carioca.
+FORMATO OBRIGATÓRIO: ✅ confirmações, "Gastos — Hoje:", bullets •, datas DD/MM
+[exemplos exatos das prints]
+Temperatura mental: 0.3 — Seja consistente, direto, nunca mude o layout.
+```
+
+Também adicionar `temperature: 0.3`, `top_p: 0.85`, `max_tokens: 1200` na chamada ao gateway dentro do process-message (por volta da linha 800-900 onde o fetch do gateway acontece).
+
+---
+
+## Resumo dos arquivos
+
+```
+MOD  supabase/functions/ai-chat/index.ts
+       — Injetar persona completa do Paulo no system prompt
+       — Adicionar temperature:0.3, top_p:0.85, max_tokens:1200
+
+MOD  supabase/functions/process-message/index.ts  
+       — Injetar persona do Paulo no início do system prompt WhatsApp
+       — Adicionar temperature:0.3, top_p:0.85, max_tokens:1200 na chamada gateway
+```
+
+Sem mudanças de banco. Sem novos pacotes. Deploy automático dos edge functions.
+
+### Resultado
+- Chat web (app) e WhatsApp respondem com formatação idêntica às prints do Paulo
+- Temperatura 0.3 garante consistência de layout (nunca muda o formato)
+- Meta diária R$40 é memória permanente no prompt
+- Ações autônomas (create_note "Financeiro") continuam funcionando por baixo do formato
