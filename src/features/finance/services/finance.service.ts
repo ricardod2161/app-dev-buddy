@@ -1,6 +1,6 @@
 import { supabase } from '@/integrations/supabase/client'
 import type { FinanceMemory, GastoEntry, ReservaEntry, MesHistorico } from '../types/transaction.types'
-import { parseMonetaryValue, parseReservaTotalFromContent, formatDateDDMM, currentMonthKey, formatBRL } from '../lib/parse-finance'
+import { parseMonetaryValue, parseReservaTotalFromContent, formatDateDDMM, currentMonthKey } from '../lib/parse-finance'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
